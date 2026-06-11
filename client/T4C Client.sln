@@ -1,0 +1,50 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 10.00
+# Visual Studio 2008
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Sound Engine", "Sound Engine\Sound Engine.vcproj", "{D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "T4C Client", "T4C Client\T4C Client.vcproj", "{9D1E6120-571D-4E9C-93BC-91541422212D}"
+	ProjectSection(ProjectDependencies) = postProject
+		{22F2DC15-EE71-4D3D-82FE-C5C0B4912F53} = {22F2DC15-EE71-4D3D-82FE-C5C0B4912F53}
+		{D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD} = {D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "T4CConfig", "T4CConfig\T4CConfig.vcproj", "{22F2DC15-EE71-4D3D-82FE-C5C0B4912F53}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Debug|x64 = Debug|x64
+		Release|Win32 = Release|Win32
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD}.Debug|Win32.ActiveCfg = Debug|Win32
+		{D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD}.Debug|Win32.Build.0 = Debug|Win32
+		{D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD}.Debug|x64.ActiveCfg = Debug|Win32
+		{D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD}.Debug|x64.Build.0 = Debug|Win32
+		{D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD}.Release|Win32.ActiveCfg = Release|Win32
+		{D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD}.Release|Win32.Build.0 = Release|Win32
+		{D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD}.Release|x64.ActiveCfg = Release|Win32
+		{D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD}.Release|x64.Build.0 = Release|Win32
+		{9D1E6120-571D-4E9C-93BC-91541422212D}.Debug|Win32.ActiveCfg = Debug|Win32
+		{9D1E6120-571D-4E9C-93BC-91541422212D}.Debug|Win32.Build.0 = Debug|Win32
+		{9D1E6120-571D-4E9C-93BC-91541422212D}.Debug|x64.ActiveCfg = Debug|Win32
+		{9D1E6120-571D-4E9C-93BC-91541422212D}.Debug|x64.Build.0 = Debug|Win32
+		{9D1E6120-571D-4E9C-93BC-91541422212D}.Release|Win32.ActiveCfg = Release|Win32
+		{9D1E6120-571D-4E9C-93BC-91541422212D}.Release|Win32.Build.0 = Release|Win32
+		{9D1E6120-571D-4E9C-93BC-91541422212D}.Release|x64.ActiveCfg = Release|Win32
+		{9D1E6120-571D-4E9C-93BC-91541422212D}.Release|x64.Build.0 = Release|Win32
+		{22F2DC15-EE71-4D3D-82FE-C5C0B4912F53}.Debug|Win32.ActiveCfg = Debug|Win32
+		{22F2DC15-EE71-4D3D-82FE-C5C0B4912F53}.Debug|Win32.Build.0 = Debug|Win32
+		{22F2DC15-EE71-4D3D-82FE-C5C0B4912F53}.Debug|x64.ActiveCfg = Debug|Win32
+		{22F2DC15-EE71-4D3D-82FE-C5C0B4912F53}.Debug|x64.Build.0 = Debug|Win32
+		{22F2DC15-EE71-4D3D-82FE-C5C0B4912F53}.Release|Win32.ActiveCfg = Release|Win32
+		{22F2DC15-EE71-4D3D-82FE-C5C0B4912F53}.Release|Win32.Build.0 = Release|Win32
+		{22F2DC15-EE71-4D3D-82FE-C5C0B4912F53}.Release|x64.ActiveCfg = Release|Win32
+		{22F2DC15-EE71-4D3D-82FE-C5C0B4912F53}.Release|x64.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

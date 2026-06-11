@@ -1,0 +1,15 @@
+Assets runtime — copie locale (Original Client 1.72)
+====================================================
+
+Source copiée le 2026-06-02 depuis :
+  /mnt/hard/underground/Nouveau dossier (2)/T4C_V1R7X/1.7/1.7/T4C Client/Original Client 1.72
+
+Politique : copies uniquement (cp -a). Rien n'a été supprimé à la source.
+
+Regénérer :
+  ./scripts/copy_runtime_assets.sh
+
+Ou avec une autre source :
+  T4C_ORIGINAL_CLIENT=/chemin/vers/install ./scripts/copy_runtime_assets.sh
+
+Voir docs/RUNTIME_ASSETS.md pour le détail fichier par fichier.

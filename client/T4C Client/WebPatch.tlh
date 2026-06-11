@@ -1,0 +1,199 @@
+// Created by Microsoft (R) C/C++ Compiler Version 12.00.9782.0 (227290e6).
+//
+// WebPatch.tlh
+//
+// C++ source equivalent of Win32 type library WebPatch.Exe
+// compiler-generated file created 08/23/08 at 08:59:31 - DO NOT EDIT!
+
+#pragma once
+#pragma pack(push, 8)
+
+#include <comdef.h>
+
+namespace WEBPATCHLib {
+
+//
+// Forward references and typedefs
+//
+
+struct /* coclass */ WebPatch;
+struct __declspec(uuid("5cf5aa9d-6a4d-11d3-8576-00e02922fa40"))
+/* dual interface */ IWebPatch;
+
+//
+// Smart pointer typedef declarations
+//
+
+_COM_SMARTPTR_TYPEDEF(IWebPatch, __uuidof(IWebPatch));
+
+//
+// Type library items
+//
+
+struct __declspec(uuid("5cf5aa9e-6a4d-11d3-8576-00e02922fa40"))
+WebPatch;
+    // [ default ] interface IWebPatch
+
+struct __declspec(uuid("5cf5aa9d-6a4d-11d3-8576-00e02922fa40"))
+IWebPatch : IDispatch
+{
+    //
+    // Property data
+    //
+
+    __declspec(property(get=Geturl,put=Puturl))
+    _bstr_t url;
+    __declspec(property(get=GetuserName,put=PutuserName))
+    _bstr_t userName;
+    __declspec(property(get=GetuserPassword,put=PutuserPassword))
+    _bstr_t userPassword;
+    __declspec(property(get=GetdownloadDirectory,put=PutdownloadDirectory))
+    _bstr_t downloadDirectory;
+    __declspec(property(get=GetappDirectory,put=PutappDirectory))
+    _bstr_t appDirectory;
+    __declspec(property(get=GetappID,put=PutappID))
+    _bstr_t appID;
+    __declspec(property(get=GetimagePath,put=PutimagePath))
+    _bstr_t imagePath;
+    __declspec(property(get=Getreferer,put=Putreferer))
+    _bstr_t referer;
+    __declspec(property(get=GetwebPatchDirectory))
+    _bstr_t webPatchDirectory;
+    __declspec(property(get=GetprocessID))
+    long processID;
+    __declspec(property(put=PutlogFile))
+    _bstr_t logFile;
+
+    //
+    // Wrapper methods for error-handling
+    //
+
+    _bstr_t Geturl ( );
+    void Puturl (
+        _bstr_t pVal );
+    _bstr_t GetuserName ( );
+    void PutuserName (
+        _bstr_t pVal );
+    _bstr_t GetuserPassword ( );
+    void PutuserPassword (
+        _bstr_t pVal );
+    _bstr_t GetdownloadDirectory ( );
+    void PutdownloadDirectory (
+        _bstr_t pVal );
+    _bstr_t GetappDirectory ( );
+    void PutappDirectory (
+        _bstr_t pVal );
+    long PatchNeeded (
+        long fromV,
+        long toV );
+    long NewWebPatchNeeded (
+        BSTR * pVal );
+    _bstr_t GetappID ( );
+    void PutappID (
+        _bstr_t pVal );
+    HRESULT RefreshImage ( );
+    HRESULT StartPatch (
+        long processID,
+        _bstr_t processExec,
+        _bstr_t workingDir,
+        _bstr_t successParams,
+        _bstr_t failParams,
+        long fromVersion,
+        long toVersion );
+    _bstr_t GetimagePath ( );
+    void PutimagePath (
+        _bstr_t pVal );
+    _bstr_t Getreferer ( );
+    void Putreferer (
+        _bstr_t pVal );
+    _bstr_t GetwebPatchDirectory ( );
+    HRESULT GetModuleList (
+        BSTR * moduleList );
+    long DownloadModule (
+        _bstr_t moduleName,
+        long showUI );
+    long GetprocessID ( );
+    HRESULT ShowErrorReport ( );
+    HRESULT WriteErrorReport (
+        _bstr_t fileName );
+    void PutlogFile (
+        _bstr_t _arg1 );
+
+    //
+    // Raw methods provided by interface
+    //
+
+    virtual HRESULT __stdcall get_url (
+        BSTR * pVal ) = 0;
+    virtual HRESULT __stdcall put_url (
+        BSTR pVal ) = 0;
+    virtual HRESULT __stdcall get_userName (
+        BSTR * pVal ) = 0;
+    virtual HRESULT __stdcall put_userName (
+        BSTR pVal ) = 0;
+    virtual HRESULT __stdcall get_userPassword (
+        BSTR * pVal ) = 0;
+    virtual HRESULT __stdcall put_userPassword (
+        BSTR pVal ) = 0;
+    virtual HRESULT __stdcall get_downloadDirectory (
+        BSTR * pVal ) = 0;
+    virtual HRESULT __stdcall put_downloadDirectory (
+        BSTR pVal ) = 0;
+    virtual HRESULT __stdcall get_appDirectory (
+        BSTR * pVal ) = 0;
+    virtual HRESULT __stdcall put_appDirectory (
+        BSTR pVal ) = 0;
+    virtual HRESULT __stdcall raw_PatchNeeded (
+        long fromV,
+        long toV,
+        long * PatchNeeded ) = 0;
+    virtual HRESULT __stdcall raw_NewWebPatchNeeded (
+        BSTR * pVal,
+        long * PatchNeeded ) = 0;
+    virtual HRESULT __stdcall get_appID (
+        BSTR * pVal ) = 0;
+    virtual HRESULT __stdcall put_appID (
+        BSTR pVal ) = 0;
+    virtual HRESULT __stdcall raw_RefreshImage ( ) = 0;
+    virtual HRESULT __stdcall raw_StartPatch (
+        long processID,
+        BSTR processExec,
+        BSTR workingDir,
+        BSTR successParams,
+        BSTR failParams,
+        long fromVersion,
+        long toVersion ) = 0;
+    virtual HRESULT __stdcall get_imagePath (
+        BSTR * pVal ) = 0;
+    virtual HRESULT __stdcall put_imagePath (
+        BSTR pVal ) = 0;
+    virtual HRESULT __stdcall get_referer (
+        BSTR * pVal ) = 0;
+    virtual HRESULT __stdcall put_referer (
+        BSTR pVal ) = 0;
+    virtual HRESULT __stdcall get_webPatchDirectory (
+        BSTR * pVal ) = 0;
+    virtual HRESULT __stdcall raw_GetModuleList (
+        BSTR * moduleList ) = 0;
+    virtual HRESULT __stdcall raw_DownloadModule (
+        BSTR moduleName,
+        long showUI,
+        long * result ) = 0;
+    virtual HRESULT __stdcall get_processID (
+        long * pVal ) = 0;
+    virtual HRESULT __stdcall raw_ShowErrorReport ( ) = 0;
+    virtual HRESULT __stdcall raw_WriteErrorReport (
+        BSTR fileName ) = 0;
+    virtual HRESULT __stdcall put_logFile (
+        BSTR _arg1 ) = 0;
+};
+
+//
+// Wrapper method implementations
+//
+
+#include "WebPatch.tli"
+
+} // namespace WEBPATCHLib
+
+#pragma pack(pop)

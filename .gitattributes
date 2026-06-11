@@ -1,0 +1,22 @@
+# Normalisation des fins de ligne
+* text=auto
+*.cpp text
+*.h text
+*.md text
+*.py text eol=lf
+*.sh text eol=lf
+CMakeLists.txt text
+
+# Binaires : jamais de diff ni de normalisation
+*.dda binary
+*.did binary
+*.dpd binary
+*.dat binary
+*.bin binary
+*.wav binary
+*.mp3 binary
+*.pcx binary
+*.ttf binary
+*.elng binary
+*.png binary
+*.ico binary

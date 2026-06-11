@@ -1,0 +1,30 @@
+// ControlUI.cpp
+//
+#include "../pch.h"
+
+#include "ControlUI.h"
+
+ControlUI::ControlUI(){
+    Show();
+}
+
+ControlUI::~ControlUI(){
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////
+void ControlUI::SetSpriteId
+//////////////////////////////////////////////////////////////////////////////////////////
+//  Sets the control's sprite Id.
+// 
+(
+   std::string newSpriteId // The new sprite Id.
+  ,bool bMask
+  ,std::string newSpriteIdMask
+)
+//////////////////////////////////////////////////////////////////////////////////////////
+{
+    GameUI::SetSpriteId( newSpriteId,bMask,newSpriteIdMask );
+ 
+    // Force load the sprite Id.
+    Show();
+}

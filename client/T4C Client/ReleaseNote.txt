@@ -1,0 +1,278 @@
+Rev 0.12 -> 0.13
+	-Add snowman minion release NMS 2013-01-08
+	
+Rev 0.11 -> 0.12
+	-keep the PORT if connection fail
+	
+Rev 0.10 -> 0.11
+	-add macro CTRL-W to get reserved item if system is ON (1.73 pre feature option)
+	
+
+Rev 0.01 -> 0.02
+	-Change packet to support friendly feature
+	
+Rev 0.00 -> 0.01
+	-Fix Fix Skin item in monster structure to setup like a real monster
+
+
+Client version 172
+Rev 0.00
+
+Client version 171
+Rev 0.54 -> 0.65
+   -Add skin catapult balista and trebuchet to monster
+   -Fix skin tree monster mineral monster to see target dialog and xp bar
+
+Rev 0.59 -> 0.64
+   -Add Buy with Ecu NMS on Auction House
+   -Fix some graphic bugs
+   
+Rev 0.59 -> 0.60
+   -Add Quest book journal GUI
+
+Rev 0.57 -> 0.59
+	- Sais plus LOL...  mais rebuild...
+	
+Rev 0.56 -> 0.57
+	- Fix crash when update avaiable...
+	
+Rev 0.55 -> 0.56
+	- Fix arene GUI add Progress GUI when take item on arena
+
+Rev 0.54 -> 0.55
+	-Change patchserver sequence..  Now we ask the update version in first step...
+	 with this we not connect to server and not timeout a eatch update or timeout patch...
+	 
+Rev 0.53 -> 0.54
+	-Add Smile Options
+	-Fix new chest sort items
+	
+Rev 0.52 -> 0.53
+	-fix RP integration error
+	- Build new chest to have chest like Ah display
+	
+Rev 0.51 -> 0.52
+	-fix t4cupdate when it try copie new version...
+	
+Rev 0.50 -> 0.51
+	-Add new combat mode effect 3...
+	
+Rev 0.42 -> 0.50
+	-Add new UodateTools tools, and remove compatibility with old one...
+
+Rev 0.41 -> 0.42
+	-Fix interaction RP to exchange 500 points before 100
+	
+Rev 0.40 -> 0.41
+	-Add Integration RP
+	-Fix if no savegame cc color blocked
+	
+Rev 0.39 -> 0.40
+	-Add new skin fire sword, fire sword dual and death axe in blue,green,perple and yellow
+	-Add new statut skin
+	-Add other skin status, new torch lantern, etc etc...
+	
+
+Rev 0.38 -> 0.39
+	-Fix Some appearance ID can cause client crash
+	-Fix The register account delays too small now mopre bigger
+	-Add new lanterne Skin
+	-Mod Delete many brooken arrow in floor
+	
+	
+Rev 0.37 -> 0.38
+	-Add map layer to support 1 layer of ambiant sound FX.
+	-Add option into T4CConfig to support windowed 16 bits... (for Virtual Box working)
+Rev 0.36 -> 0.37 
+  REAL RELEASE to 1.71
+
+Rev 0.35 -> 0.36
+	- Fix Macro bar button now work good 
+	- Fix Change savegame for the CC and macro...
+	- Fix Display missed item on the TMI
+	- Mod Now in learn profession we display in hand gold
+	- Mod Item info dialog now sort boust... All item boust will be in same order
+	
+Rev 0.34 -> 0.35
+	- Fix Savegame... now save every 5 minutes only and when exit the game...
+	
+Rev 0.33 -> 0.34
+	- Fix Old selection mode Left part now select perfectly
+
+Rev 0.32 -> 0.33
+	- Fix Skin item on NPC die ghost and appear like scroll
+	- Fix Save Problem
+	
+Rev 0.30 -> 0.32  //skip release 31...
+	- Add UAC Message if user have no Admin RIGHT
+	- Add Option do clear connection logon with Clear button in connection menu
+	- Add option to TO GM Interface to hide player position
+	- Add option to TO GM Interface to draw on ground with item or monster
+	- Add option to display personnal NPC log only
+	- Add maximum buy and sold item to 2000
+	- Add COnnect to client with defaut config, no need to run t4cconfig.exe
+	- Add NMS button on option page only if file gmnmb.bin present on game file folder
+	- Add Minion skin avaiable in display boutique
+	- Add New Cloture Skin
+	- Fix Player movement by mouse now OK (work at any resolution)
+	- Fix map graphic bug on some resolution
+	- Fix level 1 xp progress
+	- Fix mp3 player
+	- Fix The Spin Up on the buy/ sold to make same thing
+	- Fix The value in buy / sold to center it
+	- Fix Reload (lost macro, object not appear until teleport)
+	- Fix Scroll XP and Gold blinking and display
+	- Fix crash when delete all connection info and use spin Up/Down
+	- Fix Door animation speed in 32 FPS
+	- Fix now can train more than 256 stat points...
+	- Extract help image from graphic database and put in help sub folder.
+	- Optimisation of draw function.
+	
+
+Rev 0.29 -> 0.30
+	- Change GM Request to new interface and new server communication
+
+Rev 0.28 -> 0.29
+	- Fix special caracter supported to -äïëöüéèàùâîêôû
+	- Update profession GUI Display
+ 
+Client version 171
+Rev 00 -> 0.28
+	- Start this Log Files to Log all client Change.
+	- Fix animated decors transparency when more than 1 animated object on screen.
+	- Fix Seraph connection animation and music.
+	- Fix Macrobar who block minimized when move in minimized state.
+	- Fix mp3 sound dialog + music sound when switch from MP3 and normal game sound.
+	- Fix & change sound effect volume
+	- Change scaling of music volume
+	- Change the default option value when new game started.
+	- Add Default button in option dislog to reset all option to default value.
+	- Add 4 new spells skin.
+	- Add possibility to play spell under plager in the Z-Order.
+	- Add 2 new Monster skin (total 8 color).
+	
+	
+	
+	
+------------------Graph-------------------
+	- Change 100 % of the game floor
+	- Add swamp new floor type
+	
+	
+Item Skin
+---------------------
+	Mine :Debrit Silver
+	Mine :Debrit Saphir
+	Mine :Debrit Rubis
+	Mine :Debrit Gold
+	Mine :Debrit Fer
+	Mine :Debrit Emeraude
+	Mine :Debrit Cuivre
+	Mine :Debrit Crystal
+	zz: NMS Oreille Lapin
+	zz: NMS Lutin Green Boots
+	zz: NMS Lutin Red Boots
+	Misc: NMS Flag Rouge
+	Misc: NMS Flag Bleu
+	Misc: NMS Flag Normal
+	
+Monsters Skin
+---------------------
+	Mines: Crystal01
+	Mines: Crystal02
+	Mines: Crystal03
+	Mines: Cuivre01
+	Mines: Cuivre02
+	Mines: Debrit Crystal
+	Mines: Debrit Cuivre
+	Mines: Debrit Emeraude
+	Mines: Debrit Fer
+	Mines: Debrit Gold
+	Mines: Debrit Rubis
+	Mines: Debrit Saphir
+	Mines: Debrit Silver
+	Mines: Cuivre03
+	Mines: Emeraude01
+	Mines: Emeraude02
+	Mines: Emeraude03
+	Mines: Fer01
+	Mines: Fer02
+	Mines: Fer03
+	Mines: Gold01
+	Mines: Gold02
+	Mines: Gold03
+	Mines: Rubis01
+	Mines: Rubis02
+	Mines: Rubis03
+	Mines: Saphir01
+	Mines: Saphir02
+	Mines: Saphir03
+	Mines: Silver01
+	Mines: Silver02
+	Minion:Dragon Black
+	Minion:Dragon Blue
+	Minion:Dragon Green
+	Minion:Dragon Red
+	Minion:Dragon White
+	Mines: Silver03
+	Minion:Lynx
+	Minion:Lynx Black
+	Minion:Lynx White Tiger
+	Misc: Lever
+	NMS Goblin Noel
+	NMS Chevalier Nek
+	NMS Chevalier Nek Invi
+	NMS MonstreLave01
+	NMS MonstreLave01 Inv
+	NMS Morg
+	NMS Morg Ghost
+	NMS Morg Inv
+	NMS: Olphen Paques
+	Train: Debrit Pierre
+	Train: New Armor Inv OK
+	Train: New Armor OK
+	Train: New Bow Cible Inv OK
+	Train: New Bow Cible OK
+	Train:New Bow Cible
+	Train:New Bow Cible I
+	Train:New Manequin
+	Train:New Manequin I
+	
+	
+Spells Skin
+---------------------	
+	NM Immobilisation bleu
+	NM Immobilisation rouge
+	NM Immobilisation orange
+	NM Immobilisation vert
+	NM Shout02 bleu
+	NM Immobilisation jaune
+	NM Shout02 jaune
+	NM Shout02 orange
+	NM Shout02 vert
+	NM Immobilisation violet
+	NM Shout02 violet
+	NM Blood
+	NM Vergla
+	NM Immobilisation
+	NM Shout02
+	NM Shout01
+	NM Ball White
+	NM Ball Pink
+	NM Ball Purple
+	NM Ball Yellow
+	NM Ball Green
+	NM Ball Fire
+	NM Ball Red
+	NM Ball Blue
+	NM Ball Particule White
+	NM Ball Particule Pink
+	NM Ball Particule Purple
+	NM Ball Particule Yellow
+	NM Ball Particule Green
+	NM Ball Particule Fire
+	NM Ball Particule Red
+	NM Ball Particule Bleue
+		
+	
+	

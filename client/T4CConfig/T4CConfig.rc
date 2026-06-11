@@ -1,0 +1,246 @@
+// Microsoft Visual C++ generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// English (U.S.) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+#ifdef _WIN32
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+#endif //_WIN32
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE 
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE 
+BEGIN
+    "#define _AFX_NO_SPLITTER_RESOURCES\r\n"
+    "#define _AFX_NO_OLE_RESOURCES\r\n"
+    "#define _AFX_NO_TRACKER_RESOURCES\r\n"
+    "#define _AFX_NO_PROPERTY_RESOURCES\r\n"
+    "\r\n"
+    "#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)\r\n"
+    "#ifdef _WIN32\r\n"
+    "LANGUAGE 9, 1\r\n"
+    "#pragma code_page(1252)\r\n"
+    "#endif //_WIN32\r\n"
+    "#include ""res\\T4CConfig.rc2""  // non-Microsoft Visual C++ edited resources\r\n"
+    "#include ""afxres.rc""         // Standard components\r\n"
+    "#endif\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDR_MAINFRAME           ICON                    "res\\T4CConfig.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+IDD_T4CCONFIG_DIALOG DIALOGEX 0, 0, 351, 348
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "T4CConfig"
+FONT 8, "MS Sans Serif", 0, 0, 0x1
+BEGIN
+    GROUPBOX        "Static",IDC_STATIC_GEN_CONFIG,7,7,187,90
+    COMBOBOX        IDC_CB_LANGUAGE,13,26,93,88,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "Windowed",IDC_CHK_WINDOWED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,13,45,77,10
+    CONTROL         "Disable Connect Music",IDC_CHK_CONNECT_MUSIC,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,13,56,94,10
+    CONTROL         "Use MMX",IDC_CHK_USEMMX,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,13,67,77,10
+    CONTROL         "Windowed 16 Bits (VBos support)",IDC_CHK_VBOX,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,13,85,173,10
+    GROUPBOX        "Static",IDC_SCREEN_RESOLUTION,112,23,74,58
+    CONTROL         "800 x 600",IDC_CHK_RESOL_800,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,122,40,57,10
+    CONTROL         "1024 x 768",IDC_CHK_RESOL_1024,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,122,50,57,10
+    CONTROL         "1280 x 720",IDC_CHK_RESOL_1280X720,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,122,59,57,10
+    CONTROL         "1280 x 800",IDC_CHK_RESOL_1280X800,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,122,68,57,10
+    GROUPBOX        "Macro",IDC_STATIC,7,97,187,187
+    CONTROL         "640 x 480",IDC_CHK_RESOL_640,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE,9,315,57,10
+    CONTROL         "1280 x 768",IDC_CHK_RESOL_1280,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE,9,326,57,10
+    CONTROL         "Inventory",IDC_CHK_INVENTORY,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,108,79,10
+    LTEXT           "CTRL +",IDC_STATIC,105,108,26,12,SS_CENTERIMAGE
+    EDITTEXT        IDC_EDIT_INVENTORY,133,108,19,12,ES_UPPERCASE | ES_AUTOHSCROLL
+    CONTROL         "Character",IDC_CHK_CHARACTERUI,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,121,79,10
+    LTEXT           "CTRL +",IDC_STATIC,105,121,26,12,SS_CENTERIMAGE
+    EDITTEXT        IDC_EDIT_CHARACTERUI,133,121,19,12,ES_UPPERCASE | ES_AUTOHSCROLL
+    CONTROL         "Chatter",IDC_CHK_CHATTERUI,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,134,79,10
+    LTEXT           "CTRL +",IDC_STATIC,105,134,26,12,SS_CENTERIMAGE
+    EDITTEXT        IDC_EDIT_CHATTER,133,134,19,12,ES_UPPERCASE | ES_AUTOHSCROLL
+    CONTROL         "Group Play",IDC_CHK_GROUPUI,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,147,79,10
+    LTEXT           "CTRL +",IDC_STATIC,105,147,26,12,SS_CENTERIMAGE
+    EDITTEXT        IDC_EDIT_GROUPUI,133,147,19,12,ES_UPPERCASE | ES_AUTOHSCROLL
+    CONTROL         "Guild",IDC_CHK_GUILDID,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,160,79,10
+    LTEXT           "CTRL +",IDC_STATIC,105,160,26,12,SS_CENTERIMAGE
+    EDITTEXT        IDC_EDIT_GUILDID,133,160,19,12,ES_UPPERCASE | ES_AUTOHSCROLL
+    CONTROL         "Spell Books",IDC_CHK_SPELLUI,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,172,79,10
+    LTEXT           "CTRL +",IDC_STATIC,105,172,26,12,SS_CENTERIMAGE
+    EDITTEXT        IDC_EDIT_SPELLUI,133,172,19,12,ES_UPPERCASE | ES_AUTOHSCROLL
+    CONTROL         "Macro",IDC_CHK_MACROUI,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,186,79,10
+    LTEXT           "CTRL +",IDC_STATIC,105,185,26,12,SS_CENTERIMAGE
+    EDITTEXT        IDC_EDIT_MACROUI,133,185,19,12,ES_UPPERCASE | ES_AUTOHSCROLL
+    CONTROL         "Trade",IDC_CHK_TRADE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,199,79,10
+    LTEXT           "CTRL +",IDC_STATIC,105,198,26,12,SS_CENTERIMAGE
+    EDITTEXT        IDC_EDIT_TRADE,133,198,19,12,ES_UPPERCASE | ES_AUTOHSCROLL
+    CONTROL         "Option",IDC_CHK_OPTION,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,212,79,10
+    LTEXT           "CTRL +",IDC_STATIC,105,211,26,12,SS_CENTERIMAGE
+    EDITTEXT        IDC_EDIT_OPTION,133,211,19,12,ES_UPPERCASE | ES_AUTOHSCROLL
+    CONTROL         "Profession",IDC_CHK_PROFESSION,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,225,79,10
+    LTEXT           "CTRL +",IDC_STATIC,105,223,26,12,SS_CENTERIMAGE
+    EDITTEXT        IDC_EDIT_PROFESSION,133,223,19,12,ES_UPPERCASE | ES_AUTOHSCROLL
+    CONTROL         "Screen Shot",IDC_CHK_SCREENSHOT,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,238,79,10
+    LTEXT           "CTRL +",IDC_STATIC,105,236,26,12,SS_CENTERIMAGE
+    EDITTEXT        IDC_EDIT_SCREENSHOT,133,236,19,12,ES_UPPERCASE | ES_AUTOHSCROLL
+    LTEXT           "Show Map",IDC_STATIC_MAP,30,264,35,8
+    LTEXT           "CTRL +   W",IDC_STATIC,105,264,39,10,SS_CENTERIMAGE
+    LTEXT           "Combat Mode",IDC_STATIC_COMBAT,30,273,45,8
+    LTEXT           "CTRL +   C",IDC_STATIC,105,273,36,8,SS_CENTERIMAGE
+    CTEXT           "List of Chanal Color",IDC_STR_TITLE,202,11,142,12,SS_CENTERIMAGE,WS_EX_STATICEDGE
+    CONTROL         "List1",IDC_LIST_COLOR,"SysListView32",LVS_REPORT | LVS_SINGLESEL | LVS_NOCOLUMNHEADER | WS_BORDER | WS_TABSTOP,202,27,142,216
+    PUSHBUTTON      "Add",IDC_BTN_ADD,258,251,42,14
+    PUSHBUTTON      "Modify",IDC_BTN_MOD,302,251,42,14
+    PUSHBUTTON      "Delete",IDC_BTN_DEL,302,269,42,14
+    PUSHBUTTON      "Restore Default Color",IDC_BTN_RESTAURE_DEFAULT_COLOR,202,269,98,14
+    PUSHBUTTON      "",IDC_BTN_COLOR,202,251,50,14
+    PUSHBUTTON      "Save",IDC_BTN_SAVE,129,329,93,18
+    EDITTEXT        IDC_MP3_PLAYLIST_FILE,9,296,312,14,ES_AUTOHSCROLL | ES_READONLY
+    PUSHBUTTON      ".  .  .",IDC_BTN_MP3_BROWSE,323,296,21,14
+    LTEXT           "Integrated Mp3 Player PLAYList (.WPL file)",IDC_STATIC,10,287,136,8
+    CONTROL         "Screen Shot",IDC_CHK_TAKE_ITEM_ID,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,19,251,79,10
+    LTEXT           "CTRL +",IDC_STATIC,105,249,26,12,SS_CENTERIMAGE
+    EDITTEXT        IDC_EDIT_TAKE_ITEM_ID,133,249,19,12,ES_UPPERCASE | ES_AUTOHSCROLL
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,1
+ PRODUCTVERSION 1,0,0,1
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x4L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "T4CConfig MFC Application"
+            VALUE "FileVersion", "1, 0, 0, 1"
+            VALUE "InternalName", "T4CConfig"
+            VALUE "LegalCopyright", "Copyright (C) 2008"
+            VALUE "OriginalFilename", "T4CConfig.EXE"
+            VALUE "ProductName", "T4CConfig Application"
+            VALUE "ProductVersion", "1, 0, 0, 1"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog Info
+//
+
+IDD_T4CCONFIG_DIALOG DLGINIT
+BEGIN
+    IDC_CB_LANGUAGE, 0x403, 8, 0
+0x6e45, 0x6c67, 0x7369, 0x0068, 
+    IDC_CB_LANGUAGE, 0x403, 9, 0
+0x7246, 0x6e61, 0x61e7, 0x7369, "\000" 
+    IDC_CB_LANGUAGE, 0x403, 8, 0
+0x6544, 0x7475, 0x6373, 0x0068, 
+    0
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO 
+BEGIN
+    IDD_T4CCONFIG_DIALOG, DIALOG
+    BEGIN
+        BOTTOMMARGIN, 329
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+#endif    // English (U.S.) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+#define _AFX_NO_SPLITTER_RESOURCES
+#define _AFX_NO_OLE_RESOURCES
+#define _AFX_NO_TRACKER_RESOURCES
+#define _AFX_NO_PROPERTY_RESOURCES
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+#ifdef _WIN32
+LANGUAGE 9, 1
+#pragma code_page(1252)
+#endif //_WIN32
+#include "res\T4CConfig.rc2"  // non-Microsoft Visual C++ edited resources
+#include "afxres.rc"         // Standard components
+#endif
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

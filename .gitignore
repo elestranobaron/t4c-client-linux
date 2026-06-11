@@ -1,0 +1,21 @@
+# --- Binaires de build ---
+build/
+CMakeFiles/
+CMakeCache.txt
+
+# --- Assets jeu (propriétaires Vircom, ~486 Mo) ---
+# Réintégrés via : export T4C_ORIGINAL_CLIENT=… && ./scripts/setup_from_clone.sh
+runtime/*
+!runtime/SOURCE.txt
+
+# --- Sorties d'exécution ---
+logs/
+debug/
+*.log
+
+# --- IDE / caches ---
+.cache/
+.vscode/
+.idea/
+__pycache__/
+*.pyc
