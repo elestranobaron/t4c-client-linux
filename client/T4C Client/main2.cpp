@@ -437,14 +437,6 @@ void RestartT4C()
 
 UINT WINAPI Decryption(LPVOID pParam) 
 {
-   if (!DecriptVSB(FALSE, TRUE)) 
-   {
-      SetDlgItemText(GlobalHwnd, IDC_MESSAGE, g_LocalString[189]);
-      while (TRUE) 
-         Sleep(15);
-      return 0;
-   }
-   
    if (DecriptVSB(FALSE, FALSE)) 
    {
       EndDialog(GlobalHwnd, 0);
@@ -746,7 +738,7 @@ static long FAR PASCAL WindowMessageInput(
 
          if(wParam == SC_MINIMIZE)
          {
-            if(g_Var.inGame)//BLBL même si on est pas encore INGAME !
+            if(g_Var.inGame)//BLBL mï¿½me si on est pas encore INGAME !
             {
                g_Var.minimizeState = true;
             }
@@ -1160,7 +1152,7 @@ int WINAPI WinMain
    { 
       /*
       MessageBox(NULL,"Welcome on T4C !\nPlease proceed to the basic configuration before launching the game.\n\n"\
-                      "Bienvenue sur T4C !\nVeuillez procéder à la configuration de base avant le lancement du jeu.\n\n"\
+                      "Bienvenue sur T4C !\nVeuillez procï¿½der ï¿½ la configuration de base avant le lancement du jeu.\n\n"\
                       "Willkommen T4C !\nBitte fahren Sie mit der Grundkonfiguration vor dem Start des Spiels"
          ,"Information!", MB_OK+MB_ICONINFORMATION);
       ShellExecute(NULL, "open", "T4CConfig.exe", "", "", SW_SHOW);
@@ -1475,7 +1467,7 @@ void InitializeTFCData(void)
    {
       MessageBox(siGethWnd(), "Invalid config file... Use T4CConfig.exe.\n\n"
          "Fichier de configuration invalid... Utiliser T4CConfig.exe.\n\n"
-         "Ungültige Konfigurationsdatei... Verwenden T4CConfig.exe.\n\n", "Error / Erreur / Fehler", MB_OK);
+         "Ungï¿½ltige Konfigurationsdatei... Verwenden T4CConfig.exe.\n\n", "Error / Erreur / Fehler", MB_OK);
       exit(777);
    }
    */
@@ -1948,8 +1940,8 @@ void InitializeTFCData(void)
         return;
      }
 
-     g_FirstInitCreateComplete = FALSE;
-     _beginthread( FirstInitCreate, 0, NULL );
+   g_FirstInitCreateComplete = FALSE;
+   _beginthread( FirstInitCreate, 0, NULL );
 }
  
 void ParseText(char *pText) 
@@ -2774,11 +2766,18 @@ void FirstInitCreate(LPVOID pParam)
    
    
    g_bFirstLoadComplete = FALSE;
-   _beginthread( FirstInitObject, 0, NULL );
+   if (hrLoading)
+   {
+      DXDBlt(diLoading);
+      DrawFisrtLoadingText();
+      DXDFlip();
+   }
+   // Load assets on this thread: parallel LoadSprite + DXDFlip deadlocks DirectDraw on Win10+.
+   FirstInitObject(NULL);
    
    // NMNMNM_Size_ 18 megs deja...
    int iCntMin = 30;
-   while(!g_bFirstLoadComplete || iCntMin >0)
+   while(iCntMin > 0)
    { 
       Sleep(100);
       if(hrLoading)

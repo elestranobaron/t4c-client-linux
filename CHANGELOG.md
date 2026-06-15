@@ -7,6 +7,306 @@ Familles : **Décision**, **Assets**, **Build**, **Réseau**, **Rendu**, **Serve
 
 ---
 
+## 2026-06-15 22:27:00 — ✅ CONFIRMÉ EN JEU : entrée des mondes réussie (serveur Linux)
+
+**Famille : Réseau / Rendu / Build**
+
+Validation utilisateur après désactivation de `/Zc:threadSafeInit-` : **« c parfait, on a enfin réussi »**. Le client Windows (1.72, build VS2022) entre désormais en jeu avec un personnage existant contre un serveur Linux — le handler opcode 13 construit la totalité des dialogues sans interblocage, jusqu'à l'affichage du monde.
+
+La cause racine de toute la saga d'interblocages (« please wait while loading », `V2PalManager`, `V3_StatsDlg`, dialogues opcode 13, « bloqué au loading à l'entrée des mondes ») était **unique** : le guard d'initialisation des `static` locales thread-safe ajouté par VS2022. La désactivation du flag restaure la sémantique d'origine et résout l'ensemble d'un coup, sans toucher au comportement réseau ni casser la compatibilité serveur Windows.
+
+Restent à traiter (mis de côté à la demande de l'utilisateur) : curseur inactif sur la fenêtre de login, feuille de stats après création de perso, suppression de personnage.
+
+---
+
+## 2026-06-15 22:05:00 — Correction RACINE : désactivation de /Zc:threadSafeInit (annule le wrap threadLock)
+
+**Famille : Build / Réseau / Rendu**
+
+### Le wrap threadLock (16:40) a empiré le symptôme — annulé
+
+Prendre `threadLock` avant la construction a fait bloquer le client **encore plus tôt** : la trace s'arrête désormais sur `13: 46 envoye (proactif)`, c.-à-d. **à l'acquisition de `threadLock`** (avant `13: dlg DisplayHelp`). Donc un autre thread (principal L928 / rendu `RootBoxUI::Draw`) tient `threadLock` et ne le relâche jamais. Vérifications faites : `COMMCallBack` exécute le handler sous `packetLock` (`TFCSocket.cpp` L2792), mais `PacketCenter::SendPacket` ne prend **pas** `packetLock` → pas d'inversion `packetLock`↔`threadLock`. Le détenteur de `threadLock` reste donc coincé sur un **guard d'init statique thread-safe**. Wrap retiré.
+
+### Cause racine commune à TOUTE la saga
+
+`V2PalManager`, `V3_StatsDlg`, puis les ~19 dialogues de l'opcode 13 : à chaque fois, l'interblocage vient du **guard d'initialisation des statiques locales thread-safe** ajouté par VS2022 (`/Zc:threadSafeInit`, activé par défaut depuis VS2015). Ce code (ère VC6) suppose l'ancienne sémantique **non thread-safe** des `static` locales. Le guard crée des cycles guard↔`threadLock` impossibles à l'origine, et explique pourquoi le client fonctionne contre un serveur Windows uniquement par chance de timing.
+
+### Correctif
+
+`T4C Client.vcxproj` (Release **et** Debug) : ajout de `/Zc:threadSafeInit-` aux `AdditionalOptions`. Restaure la sémantique d'origine : plus aucun guard sur les statiques locales → plus aucun interblocage de guard, sur toute la base. Les guards à pointeur global posés sur `V2PalManager`/`V3_StatsDlg` deviennent inoffensifs (ils court-circuitent simplement). Aucun changement de comportement réseau ; impact serveur Windows nul.
+
+---
+
+## 2026-06-15 16:40:00 — Correctif (annulé) du deadlock d'entrée : threadLock pris AVANT la construction des dialogues (opcode 13)
+
+**Famille : Réseau / Rendu**
+
+### Observation décisive (trace utilisateur)
+
+Avec le gating `g_UiInit` sur `RQ_HPchanged`/`RQ_ManaChanged`, l'opcode 13 est enfin reçu et traité (`CB recu type=13 state=2`). Le handler progresse jusqu'à `13: 46 envoye (proactif)` puis **se fige sur la première construction de dialogue** : la dernière trace est `13: dlg DisplayHelp`, juste avant `V3_DisplayHelpDlg::GetInstance()`. Ce n'est donc **pas** spécifique à un dialogue : c'est générique à « construire un dialogue sur le thread réseau pendant que le thread principal/rendu touche RootBoxUI ».
+
+### Cycle d'interblocage identifié
+
+- Le handler opcode 13 met `WantPreGame=false` **tôt** ; le thread principal (`TFCSocket.cpp` L928) entre alors dans le bloc `!WantPreGame` et prend `RootBoxUI::GetLock()` (`threadLock`, un `CRITICAL_SECTION`). Le thread de rendu prend aussi `threadLock` dans `RootBoxUI::Draw`.
+- Thread réseau (handler 13) : `GetInstance()` → prise du **guard d'init statique thread-safe** (VS2022 `/Zc:threadSafeInit`) → puis `AddChild` qui **veut `threadLock`**.
+- Thread principal/rendu : tient `threadLock` → appelle un `GetInstance()` qui **attend le guard**.
+- → Étreinte guard ↔ threadLock.
+
+### Correctif (`Packet.cpp`, handler opcode 13)
+
+Le handler prend désormais `threadLock` **avant** de construire le moindre dialogue (`CAutoLock _entryUiLock( RootBoxUI::GetInstance()->GetLock() )`), pour tout le bloc de construction (dialogues + `ClientInitialize` + `UpdateCharacterSheet` + `SetSideMenuState`), puis le relâche **avant** la loadloop (qui ne doit pas bloquer le rendu). Ainsi, pendant la construction sur le thread réseau, les autres threads bloquent à l'**acquisition de `threadLock`** — sans détenir aucun guard — donc plus de cycle. Les `AddChild` internes reprennent `threadLock` en **récursif** (`CRITICAL_SECTION` réentrant sur le même thread).
+
+Aucun impact serveur Windows : le bloc s'exécute déjà sur le thread réseau ; on ne fait qu'ordonner la prise de verrou pour casser l'inversion.
+
+---
+
+## 2026-06-15 05:06:00 — Correctif définitif : guard à pointeur global sur V3_StatsDlg (pas de pré-chauffage)
+
+**Famille : Réseau / Rendu**
+
+### Régression du pré-chauffage (04:49) — annulée
+
+Pré-construire `V3_StatsDlg`/`V3_InvDlg`/`V3_MainBarDlg` depuis `TFCSocket::MainThread` (après `COMM.State=2`) a **déplacé** le deadlock plus tôt : le client restait bloqué **avant même** d'envoyer `PutPlayerInGame` (sélection de perso). Cause : le constructeur fait `RootBoxUI::AddChild(this)` (prend le verrou RootBoxUI) pendant que le **thread de rendu** tient ce verrou et appelle `V3_StatsDlg::GetInstance()` (HUD) → même étreinte guard-vs-lock, juste avancée. Pré-chauffage + includes retirés.
+
+### Observation décisive
+
+Le handler `RQ_PutPlayerInGame` (opcode 13, `Packet.cpp` L6285-6310) construit **déjà ~19 dialogues via `GetInstance()` sur le thread réseau** (`g_UiInit`) et fonctionne contre un serveur Windows. Donc « construire un dialogue sur le thread réseau » n'est pas le problème. Le problème est **spécifique à `V3_StatsDlg`** : le thread de rendu lit en continu ses stats (HUD), donc une course sur le guard d'init statique se produit dès que le `type=33` (Linux, reçu avant l'opcode 13) déclenche sa **première** construction sur le thread réseau.
+
+### Correctif (calqué sur le fix `V2PalManager`)
+
+`V3_StatsDlg.cpp` : pointeur global `g_pStatsDlgInstance` posé en **première ligne** du constructeur, et renvoyé par `GetInstance()` s'il est non nul :
+
+```cpp
+static V3_StatsDlg* g_pStatsDlgInstance = NULL;
+// ... ctor : g_pStatsDlgInstance = this;  (1re ligne)
+V3_StatsDlg *V3_StatsDlg::GetInstance(void) {
+   if (g_pStatsDlgInstance) return g_pStatsDlgInstance;  // appel concurrent pendant la construction
+   static V3_StatsDlg instance;
+   return &instance;
+}
+```
+
+Ainsi, pendant que le thread réseau construit l'instance, l'appel concurrent du thread de rendu récupère l'instance-en-cours et **ne bloque pas** sur le guard → le verrou RootBoxUI est relâché → la construction se termine. Aucun déplacement de la construction ; comportement post-construction identique. Binaire redéployé dans `runtime` (05:06).
+
+Si un autre dialogue continûment référencé par le rendu déclenchait le même blocage, le même guard lui serait appliqué (le trace granulaire « 13: … » du handler opcode 13 localiserait précisément l'arrêt).
+
+---
+
+## 2026-06-15 04:49:00 — CAUSE RACINE : deadlock du thread réseau sur un singleton UI (V3_StatsDlg)
+
+**Famille : Réseau / Rendu**
+
+### Preuve (trace `DEDUP OK/DROP`)
+
+La trace décisive a **innocenté la dédup** : l'opcode 13 (90 o) et le megapack (271 o) sont loggés `UDP recu` (thread socket) mais n'apparaissent **ni** en `DEDUP OK` **ni** en `DEDUP DROP`. Le dernier paquet réellement dépilé est `DEDUP OK ushID=10` (le `type=33`, HP). Après lui, le thread `UDPProcessPacketFct` **ne dépile plus rien** alors que le thread socket continue de recevoir.
+
+⇒ Le thread réseau est **bloqué dans le traitement du `type=33`**, donc l'opcode 13 reste dans la file IOCP, jamais traité → blocage au loading.
+
+### Cause racine
+
+`COMMCallBack` appelle `HandlePacket` **directement sur le thread réseau** en state=2. Le handler `RQ_HPchanged` (33) fait `V3_StatsDlg::GetInstance()->IsShown()`.
+
+`V3_StatsDlg::GetInstance()` est un **singleton Meyers** (`static V3_StatsDlg instance;`). Face à un serveur Linux, le `RQ_HPchanged` arrive **avant** la fin de l'entrée (opcode 13), donc la **toute première** construction de ce dialogue se fait **sur le thread réseau**, pendant que le thread principal tient un verrou UI. Le **guard d'initialisation statique thread-safe de VS2022** (`/Zc:threadSafeInit`, absent du build VC6/VC8 d'origine) inter-bloque avec ce verrou → deadlock permanent du thread réseau.
+
+C'est la même famille de bug que le hang « please wait » de `V2PalManager` (corrigé précédemment), mais ici cross-thread plutôt que ré-entrant.
+
+Contre un serveur **Windows**, l'opcode 13 (entrée) est traité **avant** qu'un `RQ_HPchanged` n'arrive : `V3_StatsDlg` est donc construit côté thread principal en premier, et le bug ne se déclenche pas.
+
+### Correctif (client, sûr et non régressif)
+
+`TFCSocket::MainThread` (thread principal), juste après `COMM.State = 2` et **avant** l'envoi de `PutPlayerInGame` (donc avant tout paquet in-game) : pré-construction des dialogues HUD dont les handlers in-game appellent `GetInstance()` :
+
+```cpp
+V3_StatsDlg::GetInstance();
+V3_InvDlg::GetInstance();
+V3_MainBarDlg::GetInstance();
+```
+
+Leur `GetInstance()` ultérieur depuis le thread réseau se contente alors de renvoyer l'instance déjà prête — aucune construction concurrente, aucun deadlock. Comportement identique face à un serveur Windows.
+
+Includes ajoutés dans `TFCSocket.cpp` : `V3_StatDlg.h`, `V3_InvDlg.h`. Binaire redéployé dans `runtime` (04:49).
+
+---
+
+## 2026-06-15 04:16:00 — Diagnostic : l'opcode 13 est jeté par la dédup NM client (preuve définitive)
+
+**Famille : Réseau**
+
+### Constat
+
+Malgré `ClearAllReceivedPacketIDs()` à l'envoi de `RQ_PutPlayerInGame` (binaire 03:41 bien déployé dans `runtime`), l'opcode 13 (et ses 5 retries, ID 16/18/20/22/24/26) arrivent physiquement (`UDP recu nbuf=90`) mais n'atteignent **jamais** `COMMCallBack` (aucun `CB recu type=13`).
+
+### Élimination des fausses pistes
+
+- L'opcode 13 `[10 10 …]` = `0x1010` → ushID=16, needAck=1, **pas** de compress/split → chemin normal (`else` → `PostReceivePacket`).
+- `AnalyzePacket` appelle **toujours** le callback (pas de drop).
+- `PostReceivePacket` ne drop jamais (incrément + IOCP).
+- `COMMCallBack` logge **tous** les types sauf 10.
+- ⇒ Le **seul** point de rejet possible est la dédup `AlreadyReceivedPacket` (ligne 452).
+- Les retries ont des ID **neufs** après le reset, donc d'autres paquets in-game enregistrent ces ID juste avant chaque opcode 13.
+
+### Conséquence
+
+Le plan « megapack-off serveur » est invalidé : l'opcode 13 est **déjà** un datagramme direct (pas de megapack) et est quand même jeté. Le correctif doit viser la dédup côté client.
+
+### Action
+
+Ajout d'une trace décisive dans `UDPProcessPacketFct` (`NMPacketManager.cpp`) :
+- `DEDUP OK ushID=… nbuf=…` pour chaque paquet accepté (≥ 12 o).
+- `DEDUP DROP ushID=… nbuf=…` pour chaque paquet jeté comme doublon.
+
+Cela révélera l'ID exact des paquets in-game qui « squattent » 16/18/20/… avant l'opcode 13, pour choisir le correctif dédup adéquat. Binaire redéployé dans `runtime` (04:16).
+
+---
+
+## 2026-06-15 00:31:00 — Récupération de perso : client Windows auto-adaptatif au serveur Linux
+
+**Famille : Réseau**
+
+### Contexte
+
+La récupération d'un personnage existant fonctionne avec le client Linux mais échoue avec le client Windows quand le serveur est Linux (feuille de stat / sac incomplets). Le client Linux fonctionne car il **tire** lui-même tout son état post-entrée.
+
+### Diagnostic
+
+`AsyncRQFUNC_PutPlayerInGame` (serveur) diverge selon `#ifdef _WIN32` :
+
+| Branche | Comportement après l'opcode 13 (stats de base) |
+|---|---|
+| `_WIN32` | **pousse** spontanément le sac (`StartViewBackpack2`), le statut (`PacketStatus`) et l'inview (`packet_inview_units`) |
+| Linux (`#else`) | n'envoie **que** l'opcode 13, puis `BeginSession()` — rien d'autre poussé |
+
+Or le client Windows ne tire de lui-même que `RQ_GetSkillList` (39) + `RQ_GetNearItems` (60) (+ handshake 46) et **attend** que le serveur pousse le statut (43) et le sac (154). Face au serveur Linux qui ne pousse rien, ces données n'arrivent jamais.
+
+### Cause racine — interblocage sur l'opcode 46
+
+Le vrai blocage (vu côté serveur : perso bloqué en `preInGame=1 / in_game=0`) est un **interblocage** sur `RQ_FromPreInGameToInGame` (46) :
+
+- Côté **serveur**, c'est `Character::StartAsyncFromPregameToGame()` — déclenché par la **réception du 46** — qui bascule `in_game=TRUE` *puis* pousse sac + statut + **inview** (`packet_inview_units`, `Character.cpp` L15765).
+- Côté **client Windows**, le 46 n'est émis que dans le handler `TFCAddObject`, donc **uniquement à réception du push inview**.
+
+→ Le client attend l'inview pour envoyer le 46 ; le serveur attend le 46 pour pousser l'inview. Le serveur **Windows** brise le cycle en poussant l'inview tôt (branche `#ifdef _WIN32` de `AsyncRQFUNC_PutPlayerInGame`) ; le serveur **Linux** ne le fait pas → blocage définitif.
+
+### Correction (côté client uniquement, `Packet.cpp`, handler `RQ_PutPlayerInGame`)
+
+Après l'entrée (opcode 60), le client Windows envoie désormais **proactivement** :
+- `RQ_FromPreInGameToInGame` (46) — **débloque la bascule `in_game`** ; le serveur enchaîne alors push sac + statut + inview → entrée en jeu effective.
+
+Plus, en filet de sécurité (UDP non fiable, données déjà poussées par le serveur) :
+- `RQ_GetStatus` (43) — statut / jauges
+- `RQ_ViewInv` (156) — sac à dos
+
+Requêtes identiques à celles déjà émises nativement par `V3_InvDlg`. Pas de détection d'OS : c'est le modèle « pull » du client Linux, appliqué par défaut.
+
+### Pourquoi ça ne casse pas le serveur Windows
+
+- **46 redondant** : un 46 reçu alors que le joueur est déjà `in_game` retombe sur la branche **no-op** du handler serveur (`TFCMessagesHandler.cpp` L1028 : `if(!boPreInGame || in_game)` → renvoie un 46 vide, ne fait rien).
+- **Statut / sac** : ce sont des **instantanés d'état** ; leurs handlers font des affectations (`Player.Hp = …`), pas des cumuls. Reçus une 2e fois, ils réécrivent la même mémoire avec les mêmes valeurs (idempotent).
+
+Aucun effet observable côté serveur Windows ; entrée en jeu + récupération réparées côté serveur Linux. Le client Linux (qui marche) n'est pas touché.
+
+### Reste à faire (non couvert ici)
+
+Curseur inactif sur la fenêtre de login, feuille de stat après création de perso, suppression de personnage.
+
+---
+
+## 2026-06-14 20:13:00 — Lancement build Microsoft Windows (client Vircom 1.72, VS2022)
+
+**Famille : Build**
+
+### Contexte
+
+Reprise compilation native Windows (`client/T4C Client.sln`, toolset **v143**, VS 2022 Community). Échecs récents dus surtout à des **includes manquants/corrompus** et à des ajustements de compatibilité VS2022, pas à du code métier Linux.
+
+### Diagnostic
+
+| Symptôme | Cause |
+|---|---|
+| `TemplateQueue` inconnu / erreur de syntaxe avant `<` | `templatequeues.h` **corrompu** (auto-include `#include "templatequeues.h"` sans définition de classe) |
+| `GetQueuedCompletionStatus` : `void**` vs `LPOVERLAID*` | Port Linux : 4ᵉ argument typé `void*` au lieu de `OVERLAPPED*` sous Windows |
+| `std::replace` introuvable (V3_QuestBook*, V3_Chest*, etc.) | `<algorithm>` absent du PCH |
+| `mapix.h` introuvable | `MailMan.h` incluait Extended MAPI inutile ; le code n'utilise que Simple MAPI (`mapi.h`) |
+| `mapi.h` : `FAR` / `LHANDLE` invalides | `windows.h` manquant avant `mapi.h` dans `MailMan.h` |
+| `C3892` assignation via itérateur `std::set` | VS2022 applique la constance des éléments du set (`V3_ChatDlg.cpp`) |
+| `LNK1281` SAFESEH | `zlibstat.lib` + `dinput.lib` (DirectX8) pré-VS2012, sans handlers SAFESEH |
+
+### Corrections (fichiers modifiés)
+
+- **`client/T4C Client/templatequeues.h`** — restauration complète de `TemplateQueue` (FIFO Virtual Dreams : `AddToQueue`, `Retreive`, `NbObjects`).
+- **`client/T4C Client/pch.h`** — `#include <algorithm>` (pour `std::replace` dans les headers V3).
+- **`client/T4C Client/MailMan.h`** — `#include <windows.h>` + `#include <mapi.h>` uniquement (retrait `mapix.h` / `mapiutil.h` / `mapitags.h`).
+- **`client/T4C Client/UDP/NMPacketManager.cpp`** — `OVERLAPPED*` sous Windows, `void*` conservé sous `LINUX_PORT`.
+- **`client/T4C Client/NewInterface/V3_ChatDlg.cpp`** — mise à jour `std::set<RegChannel>` via erase/insert (2 sites).
+- **`client/T4C Client/T4C Client.vcxproj`** — `<ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>` (Release + Debug).
+
+### Commande build
+
+```bat
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -arch=x86
+msbuild "client\client\T4C Client.sln" /p:Configuration=Release /p:Platform=Win32 /m
+```
+
+### Résultat
+
+- **OK** — `client/client/T4C Client/Release/T4C Client.exe` (**3 057 664 octets**, 2026-06-14 20:13).
+- Dépendances compilées : `T4CConfig.exe`, `Sound Engine.lib`.
+- Aucune installation SDK/outil supplémentaire ; toolchain VS2022 Community existante uniquement.
+
+---
+
+## 2026-06-14 22:15:00 — Fix blocage au lancement (décompression musique SNMC)
+
+**Famille : Build**
+
+### Tests depuis `client/runtime/` (exe + assets)
+
+| Observation | Détail |
+|---|---|
+| Processus actif | Fenêtre **« The 4th Coming »** atteinte en ~30 s si `T4CGameFile.VSB` déjà présent dans `Documents\Dialsoft\T4CDEV\Sounds\` |
+| Cache VSB | Taille **99 744 622** octets = `Game Files\vsbinfo.txt` → pas de re-décompression |
+| Blocage perçu | Boîte « décompression musique » : `DecriptVSB()` était appelé **2× d'affilée** (décodage MP3 complet à chaque fois, plusieurs minutes) |
+| Risque crash | Si `SNMCI._` / ouverture VSB échoue, le code continuait avec des `FILE*` NULL |
+
+### Correctifs
+
+- **`Audio.cpp`** — `DecriptVSB` : création explicite `Documents\Dialsoft\T4CDEV\Sounds\`, **skip** si VSB existant = taille `VSBInfo.Txt`, `return FALSE` si fichiers SNMC/VSB inaccessibles.
+- **`main2.cpp`** — thread `Decryption` : **un seul** appel `DecriptVSB` (plus de double passe).
+
+---
+
+## 2026-06-14 23:45:00 — Fix blocage écran « please wait while loading » (deadlock static VS2022)
+
+**Famille : Build / Client Windows**
+
+### Symptôme
+
+Le client reste figé indéfiniment sur l'écran de chargement initial (`DrawFisrtLoadingText` / `g_LocalString[1]`), jamais de menu de connexion.
+
+### Diagnostic
+
+Traçage temporaire (fichier `startup_trace.log`) dans `FirstInitCreate` / `FirstInitObject` : le gel survient au **tout premier chargement de sprite** (`AttackCursorIcon.LoadSprite("StaticAttackCursor")`), juste après la création des `SoundFX`.
+
+### Cause racine — régression de toolchain (VC6/VC8 → VS2022)
+
+`CV2PalManager::GetInstance()` est un **singleton Meyers** (`static CV2PalManager pmInstance;`). Son **constructeur** appelle `m_plRefPal.LoadPalette("Bright1")` → `Sprite::LoadPalette` → **`CV2PalManager::GetInstance()` à nouveau** (ré-entrance, même thread).
+
+- VC6/VC8 (toolchain d'origine) : **pas** d'initialisation thread-safe des statics locales → la ré-entrance renvoyait l'instance partiellement construite, sans blocage.
+- VS2022 : `/Zc:threadSafeInit` **activé par défaut** → le garde d'init du static est détenu par le thread courant ; l'appel ré-entrant du **même thread** attend ce garde → **deadlock permanent**.
+
+C'est le premier `LoadSprite` qui touche le gestionnaire de palettes, d'où le gel exactement à cet endroit.
+
+### Correctif
+
+- **`V2PalManager.cpp`** — l'instance est enregistrée dans un pointeur fichier (`g_pPalManagerInstance = this;`) **au tout début du constructeur** ; `GetInstance()` renvoie ce pointeur immédiatement si présent, **avant** d'atteindre le `static` local. L'appel ré-entrant pendant la construction ne touche donc plus le garde d'init → plus de deadlock. L'initialisation thread-safe reste **activée** pour tous les autres singletons (sûreté côté threads de jeu).
+- **`main2.cpp`** — `FirstInitObject` appelé de façon **synchrone** dans `FirstInitCreate` (plus de second thread accédant au device DirectDraw en parallèle du flip) ; boucle d'animation jouée **après** le chargement.
+
+Validé E2E : démarrage jusqu'au menu de connexion OK.
+
+Binaire : `client/client/T4C Client/Release/T4C Client.exe` → déployé dans `client/runtime/T4C Client.exe`.
+
+---
+
 ## 2026-06-11 08:00:00 — DIALOGUES PNJ FONCTIONNELS, clic droit = examiner, sous-sols (monde 1), mort/persistance, torche, masques curseurs
 
 **Famille : Serveur / Réseau / Rendu / Gameplay**

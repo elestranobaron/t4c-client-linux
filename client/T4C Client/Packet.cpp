@@ -508,6 +508,22 @@ void ShootArrow
 
 
 //#pragma optimize( "", off ) 
+// Trace diagnostique de l'entree en jeu (debug interblocage 46 / loading vs serveur Linux).
+// Chemin ABSOLU pour etre trouvable quel que soit le repertoire de travail du client (process
+// eleve = CWD parfois System32). A retirer une fois le flux valide.
+void EnterGameTrace(const char *msg)
+{
+   FILE *f = NULL;
+   fopen_s(&f, "C:\\t4c_trace.log", "a");
+   if (!f)
+      fopen_s(&f, "entergame_trace.log", "a"); // repli si C:\ non inscriptible
+   if (f)
+   {
+      fprintf(f, "%lu %s\n", (unsigned long)GetTickCount(), msg);
+      fclose(f);
+   }
+}
+
 void HandlePacket(TFCPacket *Msg)
 {
    DWORD intrQueueLen = 0;
@@ -543,6 +559,14 @@ void HandlePacket(TFCPacket *Msg)
          delete e;
       }
       throw;
+   }
+
+   // DEBUG: trace de tout paquet recu via HandlePacket (sauf keep-alive 10, trop bruyant).
+   if (Type != 10)
+   {
+      char tb[96];
+      sprintf_s(tb, 96, "HP recu type=%d", (int)Type);
+      EnterGameTrace(tb);
    }
 
    //#if 1
@@ -3208,9 +3232,13 @@ void HandlePacket(TFCPacket *Msg)
     {
        Msg->Get((long *)&Player.Hp);            
 
-
-
-       if(V3_StatsDlg::GetInstance()->IsShown())
+       // Auto-adaptation serveur Linux : NE PAS toucher V3_StatsDlg tant que l'UI in-game n'est pas
+       // initialisee (g_UiInit, pose par le handler opcode 13). Le serveur Linux pousse un RQ_HPchanged
+       // (33) AVANT la fin de l'entree : appeler GetInstance() ici declencherait la TOUTE PREMIERE
+       // construction du dialogue sur le THREAD RESEAU, qui interbloque avec le thread de rendu (verrou
+       // RootBoxUI/draw) -> thread reseau fige -> l'opcode 13 n'est jamais traite -> blocage au loading.
+       // La valeur Player.Hp est deja stockee ci-dessus ; l'opcode 13 reconstruira la feuille ensuite.
+       if(g_UiInit && V3_StatsDlg::GetInstance()->IsShown())
          V3_StatsDlg::GetInstance()->UpdateCharacterSheetHP();
 
     } break;
@@ -3219,7 +3247,7 @@ void HandlePacket(TFCPacket *Msg)
     {
        Msg->Get((WORD *)&Player.Mana);            
        
-       if(V3_StatsDlg::GetInstance()->IsShown())
+       if(g_UiInit && V3_StatsDlg::GetInstance()->IsShown())
          V3_StatsDlg::GetInstance()->UpdateCharacterSheetMP();
     } break; 
        
@@ -3684,7 +3712,7 @@ void HandlePacket(TFCPacket *Msg)
           GET_LONG  ( lCharge );
           GET_LONG  ( lEquipPos );
 
-          //if(((char*)szName)[0] == 'É')
+          //if(((char*)szName)[0] == '?')
           //   ((char*)szName)[0] = 'E';
 
          
@@ -4287,7 +4315,7 @@ void HandlePacket(TFCPacket *Msg)
              GET_LONG  ( lCharge );
              GET_LONG  ( lEquipPos );
 
-             //if(((char*)szName)[0] == 'É')
+             //if(((char*)szName)[0] == '?')
              //   ((char*)szName)[0] = 'E';
 
 
@@ -6179,6 +6207,13 @@ void HandlePacket(TFCPacket *Msg)
         } break;
            
         case RQ_PutPlayerInGame: {
+
+           {
+              LPBYTE _trBuf = NULL; int _trN = 0;
+              try { Msg->GetBuffer(_trBuf, _trN); } catch (...) {}
+              char tb[96]; sprintf_s(tb, 96, "13: case entry, pktbytes=%d", _trN);
+              EnterGameTrace(tb);
+           }
            
            WantPreGame = false;
            Sleep(200);
@@ -6187,16 +6222,19 @@ void HandlePacket(TFCPacket *Msg)
            
            unsigned char ERR;
            Msg->Get((char *)&ERR);
+           EnterGameTrace("13: ERR lu");
            Msg->Get((long  *)&Player.FactionID);
            Msg->Get((long  *)&Player.ID);
            Msg->Get((short *)&Player.xPos);
            Msg->Get((short *)&Player.yPos);
            Msg->Get((short *)&Player.World);
+           EnterGameTrace("13: faction/id/pos lus");
 
            Msg->Get((long *)&Player.Hp);
            Msg->Get((long *)&Player.MaxHp);
            Msg->Get((short *)&Player.Mana);
            Msg->Get((short *)&Player.MaxMana);
+           EnterGameTrace("13: hp/mana lus");
            Msg->Get((long *)&High);
            Msg->Get((long *)&Low);
            Player.Exp = ((__int64)(High) << 32) + (__int64)(Low);
@@ -6223,34 +6261,58 @@ void HandlePacket(TFCPacket *Msg)
            Msg->Get((long *)&Low);
            Msg->Get((char *)&Custom.gWinterrize);
            Player.ExpLastLevel = ((__int64)(High) << 32) + (__int64)(Low);
-          
-           
+
+           EnterGameTrace("13: handler enter, stats parsed");
+
+           // Auto-adaptation serveur Linux (entree en jeu) ? ENVOI PROACTIF DU 46.
+           //
+           // Le client Windows n'emet normalement le 46 (RQ_FromPreInGameToInGame) que dans le
+           // handler TFCAddObject, c.-a-d. UNIQUEMENT a la reception du push ? inview ? du serveur.
+           // Or ce push n'arrive qu'apres que le serveur a bascule in_game dans
+           // StartAsyncFromPregameToGame()... lui-meme declenche par la reception du 46. Le serveur
+           // Windows brise ce cycle en poussant l'inview tot (branche #ifdef _WIN32 de
+           // AsyncRQFUNC_PutPlayerInGame) ; le serveur Linux ne le fait pas -> interblocage : le
+           // perso reste bloque en preInGame=1 / in_game=0.
+           //
+           // On envoie donc le 46 ICI, des reception de l'opcode 13 (comme le client Linux), AVANT
+           // l'ecran de loading local : ainsi le 46 part meme si le loading prend du temps. Cote
+           // serveur, StartAsyncFromPregameToGame() bascule in_game PUIS pousse sac + statut +
+           // inview (TFCAddObject). Inoffensif face a un serveur Windows : un 46 recu alors qu'on
+           // est deja in_game retombe sur la branche no-op du handler (TFCMessagesHandler.cpp L1028).
+           {
+              TFCPacket SendEnter;
+              SendEnter << (RQ_SIZE)RQ_FromPreInGameToInGame;
+              SEND_PACKET(SendEnter);
+           }
+           EnterGameTrace("13: 46 envoye (proactif)");
+
            // Force load these UI's
            g_UiInit = true;
            
            
 
            // Update the character sheet.
-           V3_DisplayHelpDlg::GetInstance();
-           V3_DisplaySpecialDlg::GetInstance();
-           V3_Mp3Dlg  ::GetInstance();
-           V3_ArenePointsDlg::GetInstance();
-           V3_ItemInfoDlg::GetInstance();
-           V3_ChestDlg::GetInstance();
-           V3_ChestNewDlg::GetInstance();
-           V3_GuildChestDlg::GetInstance();
-           V3_GuildChestNewDlg::GetInstance();
-           V3_AHVendreDlg::GetInstance();
-           V3_RTMapDlg::GetInstance();
-           V3_GMDlg::GetInstance();
-           V3_OptionsDlg::GetInstance();
-           V3_MacroDlg::GetInstance();
-           V3_SpellDlg::GetInstance();
-           V3_GroupeDlg::GetInstance();
-           V3_ProfessionDlg::GetInstance();
-           V3_InvDlg::GetInstance();
-           V3_SpellDlg::GetInstance()->RequestSpellList();
-           V3_StatsDlg::GetInstance()->UpdateCharacterSheet("OK-TFCInGame");
+           EnterGameTrace("13: dlg DisplayHelp");    V3_DisplayHelpDlg::GetInstance();
+           EnterGameTrace("13: dlg DisplaySpecial"); V3_DisplaySpecialDlg::GetInstance();
+           EnterGameTrace("13: dlg Mp3");            V3_Mp3Dlg  ::GetInstance();
+           EnterGameTrace("13: dlg ArenePoints");    V3_ArenePointsDlg::GetInstance();
+           EnterGameTrace("13: dlg ItemInfo");       V3_ItemInfoDlg::GetInstance();
+           EnterGameTrace("13: dlg Chest");          V3_ChestDlg::GetInstance();
+           EnterGameTrace("13: dlg ChestNew");       V3_ChestNewDlg::GetInstance();
+           EnterGameTrace("13: dlg GuildChest");     V3_GuildChestDlg::GetInstance();
+           EnterGameTrace("13: dlg GuildChestNew");  V3_GuildChestNewDlg::GetInstance();
+           EnterGameTrace("13: dlg AHVendre");       V3_AHVendreDlg::GetInstance();
+           EnterGameTrace("13: dlg RTMap");          V3_RTMapDlg::GetInstance();
+           EnterGameTrace("13: dlg GM");             V3_GMDlg::GetInstance();
+           EnterGameTrace("13: dlg Options");        V3_OptionsDlg::GetInstance();
+           EnterGameTrace("13: dlg Macro");          V3_MacroDlg::GetInstance();
+           EnterGameTrace("13: dlg Spell");          V3_SpellDlg::GetInstance();
+           EnterGameTrace("13: dlg Groupe");         V3_GroupeDlg::GetInstance();
+           EnterGameTrace("13: dlg Profession");     V3_ProfessionDlg::GetInstance();
+           EnterGameTrace("13: dlg Inv");            V3_InvDlg::GetInstance();
+           EnterGameTrace("13: SpellList");          V3_SpellDlg::GetInstance()->RequestSpellList();
+           EnterGameTrace("13: StatsUpdate");        V3_StatsDlg::GetInstance()->UpdateCharacterSheet("OK-TFCInGame");
+           EnterGameTrace("13: dialogs+stats OK");
 
            if(g_uiReloadForce)
            {
@@ -6270,10 +6332,14 @@ void HandlePacket(TFCPacket *Msg)
               SEND_PACKET(Send2);
            }
 
+           EnterGameTrace("13: avant ClientInitialize");
            RootBoxUI::GetInstance()->ClientInitialize();
+           EnterGameTrace("13: ClientInitialize OK");
 
            V3_InvDlg::GetInstance()->UpdateCharacterSheet();
+           EnterGameTrace("13: InvUpdate OK");
            RootBoxUI::GetInstance()->SetSideMenuState(true);
+           EnterGameTrace("13: SideMenu OK");
            
            // Get the skill list.
            TFCPacket sending;
@@ -6318,7 +6384,12 @@ void HandlePacket(TFCPacket *Msg)
                Sleep(100);
            }
            
-
+           {
+              char tb[160];
+              sprintf_s(tb,160,"13: avant loadloop smooth=%d part2=%d",
+                        g_bSmoothFloorLoading?1:0, g_bEnterGamePart2Complete?1:0);
+              EnterGameTrace(tb);
+           }
            while(!g_bEnterGamePart2Complete || !g_bSmoothFloorLoading)
            {
               
@@ -6403,12 +6474,24 @@ void HandlePacket(TFCPacket *Msg)
            }
            
 
-           TFCPacket Send;
-           Send << (short)60;
-           
+           EnterGameTrace("13: loadloop terminee");
+
            Code13 = true;
            EnterGame = true;
+
+           // Le 46 (RQ_FromPreInGameToInGame) a deja ete envoye en debut de handler, juste apres le
+           // parsing des stats ? exactement comme le client Linux (T4CLoginSession.cpp:
+           // ParsePutPlayerInGame -> SendPostEnterWorldPackets). C'est lui qui bascule in_game cote
+           // serveur Linux et declenche le push sac/statut/inview.
+           //
+           // Apres l'entree, on tire RQ_GetNearItems (60), comme le client Linux apres la reponse 46.
+           // (GetSkillList (39) a deja ete envoye plus haut.) On NE rejoue PAS GetStatus/ViewInv ici :
+           // le client Linux ne le fait pas, et le serveur pousse deja ces donnees.
+           TFCPacket Send;
+           Send << (short)60;
            SEND_PACKET(Send);
+
+           EnterGameTrace("13: 60 envoye, fin handler");
            
            
         } break; 

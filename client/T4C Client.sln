@@ -1,15 +1,13 @@
 ﻿
-Microsoft Visual Studio Solution File, Format Version 10.00
-# Visual Studio 2008
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Sound Engine", "Sound Engine\Sound Engine.vcproj", "{D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD}"
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.37314.3 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Sound Engine", "Sound Engine\Sound Engine.vcxproj", "{D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "T4C Client", "T4C Client\T4C Client.vcproj", "{9D1E6120-571D-4E9C-93BC-91541422212D}"
-	ProjectSection(ProjectDependencies) = postProject
-		{22F2DC15-EE71-4D3D-82FE-C5C0B4912F53} = {22F2DC15-EE71-4D3D-82FE-C5C0B4912F53}
-		{D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD} = {D2E14882-AF37-4FA3-AB30-7D29DDCA0EFD}
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "T4C Client", "T4C Client\T4C Client.vcxproj", "{9D1E6120-571D-4E9C-93BC-91541422212D}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "T4CConfig", "T4CConfig\T4CConfig.vcproj", "{22F2DC15-EE71-4D3D-82FE-C5C0B4912F53}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "T4CConfig", "T4CConfig\T4CConfig.vcxproj", "{22F2DC15-EE71-4D3D-82FE-C5C0B4912F53}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -46,5 +44,8 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {34FBBA51-A3AD-4842-84CB-78A96F26F75A}
 	EndGlobalSection
 EndGlobal

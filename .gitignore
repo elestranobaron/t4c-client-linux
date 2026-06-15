@@ -19,3 +19,20 @@ debug/
 .idea/
 __pycache__/
 *.pyc
+
+# Visual Studio
+**/Release/
+**/Debug/
+.vs/
+*.obj
+*.sbr
+*.pch
+*.bsc
+*.res
+*.exp
+*.lib
+*.pdb
+*.tlog
+*.user
+*.recipe
+UpgradeLog.htm

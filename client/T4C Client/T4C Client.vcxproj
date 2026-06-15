@@ -1,0 +1,578 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{9D1E6120-571D-4E9C-93BC-91541422212D}</ProjectGuid>
+    <RootNamespace>T4C Client</RootNamespace>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <UseOfMfc>false</UseOfMfc>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <UseOfMfc>false</UseOfMfc>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(VCTargetsPath)Microsoft.CPP.UpgradeFromVC60.props" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(VCTargetsPath)Microsoft.CPP.UpgradeFromVC60.props" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>17.0.37301.8</_ProjectFileVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <OutDir>.\Release\</OutDir>
+    <IntDir>.\Release\</IntDir>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <OutDir>.\Debug\</OutDir>
+    <IntDir>.\Debug\</IntDir>
+    <IgnoreImportLibrary>false</IgnoreImportLibrary>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Midl>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MkTypLibCompatible>true</MkTypLibCompatible>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <TargetEnvironment>Win32</TargetEnvironment>
+      <TypeLibraryName>.\Release/T4C Client.tlb</TypeLibraryName>
+      <HeaderFileName />
+    </Midl>
+    <ClCompile>
+      <AdditionalOptions>/Zm200 /Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+      <Optimization>MaxSpeed</Optimization>
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <AdditionalIncludeDirectories>Zlib;..\DirectX8Lib\include;..\DirectX8Lib\include\Nope;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;NLG_LOCK;_CRT_SECURE_NO_WARNINGS;ZLIB_WINAPI;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <StringPooling>true</StringPooling>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <PrecompiledHeaderOutputFile>.\Release/T4C Client.pch</PrecompiledHeaderOutputFile>
+      <AssemblerListingLocation>.\Release/</AssemblerListingLocation>
+      <ObjectFileName>.\Release/</ObjectFileName>
+      <ProgramDataBaseFileName>.\Release/</ProgramDataBaseFileName>
+      <BrowseInformation>true</BrowseInformation>
+      <WarningLevel>Level3</WarningLevel>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <DebugInformationFormat />
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <Culture>0x1009</Culture>
+    </ResourceCompile>
+    <Link>
+      <AdditionalDependencies>zlibstat.lib;Winmm.lib;Dbghelp.lib;VFW32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <OutputFile>.\Release/T4C Client.exe</OutputFile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <AdditionalLibraryDirectories>Zlib;..\DirectX8Lib\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
+      <UACUIAccess>false</UACUIAccess>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <ProgramDatabaseFile>.\Release/T4C Client.pdb</ProgramDatabaseFile>
+      <SubSystem>Windows</SubSystem>
+      <StackReserveSize>16000000</StackReserveSize>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <DataExecutionPrevention />
+      <TargetMachine>MachineX86</TargetMachine>
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+    </Link>
+    <Bscmake>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <OutputFile>.\Release/T4C Client.bsc</OutputFile>
+    </Bscmake>
+    <PostBuildEvent>
+      <Command />
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Midl>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MkTypLibCompatible>true</MkTypLibCompatible>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <TargetEnvironment>Win32</TargetEnvironment>
+      <TypeLibraryName>.\Debug/T4C Client.tlb</TypeLibraryName>
+      <HeaderFileName />
+    </Midl>
+    <ClCompile>
+      <AdditionalOptions>/Zm200 /Zc:threadSafeInit- %(AdditionalOptions)</AdditionalOptions>
+      <Optimization>Disabled</Optimization>
+      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
+      <AdditionalIncludeDirectories>Zlib;..\DirectX8Lib\include;..\DirectX8Lib\include\Nope;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;NLOG_LOCK;ZLIB_WINAPI;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <StringPooling>true</StringPooling>
+      <MinimalRebuild>true</MinimalRebuild>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <PrecompiledHeaderOutputFile>.\Debug/T4C Client.pch</PrecompiledHeaderOutputFile>
+      <AssemblerListingLocation>.\Debug/</AssemblerListingLocation>
+      <ObjectFileName>.\Debug/</ObjectFileName>
+      <ProgramDataBaseFileName>.\Debug/</ProgramDataBaseFileName>
+      <BrowseInformation>true</BrowseInformation>
+      <WarningLevel>Level3</WarningLevel>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <Culture>0x1009</Culture>
+    </ResourceCompile>
+    <Link>
+      <AdditionalDependencies>zlibstatd.lib;Winmm.lib;Dbghelp.lib;VFW32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <OutputFile>.\Debug/T4C Client.exe</OutputFile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <AdditionalLibraryDirectories>Zlib;..\DirectX8Lib\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
+      <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>.\Debug/T4C Client.pdb</ProgramDatabaseFile>
+      <SubSystem>Windows</SubSystem>
+      <StackReserveSize>16000000</StackReserveSize>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <DataExecutionPrevention />
+      <TargetMachine>MachineX86</TargetMachine>
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+    </Link>
+    <Bscmake>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <OutputFile>.\Debug/T4C Client.bsc</OutputFile>
+    </Bscmake>
+    <PostBuildEvent>
+      <Command>copy "debug\T4C Client.exe"  "..\..\T4Cv2_RMReal\"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="2.cpp" />
+    <ClCompile Include="App.cpp" />
+    <ClCompile Include="Audio.cpp" />
+    <ClCompile Include="Autolock.cpp" />
+    <ClCompile Include="BlowFish.cpp" />
+    <ClCompile Include="buffer_nt.cpp" />
+    <ClCompile Include="CDAduio.cpp" />
+    <ClCompile Include="Comm.cpp" />
+    <ClCompile Include="database2.cpp" />
+    <ClCompile Include="DirectXInput.CPP" />
+    <ClCompile Include="Disp.cpp" />
+    <ClCompile Include="DisplayTextBox.cpp" />
+    <ClCompile Include="encrandom.cpp" />
+    <ClCompile Include="Formats.cpp" />
+    <ClCompile Include="FormatText.cpp" />
+    <ClCompile Include="Game01\Cases.cpp" />
+    <ClCompile Include="Game01\PathFinder.cpp" />
+    <ClCompile Include="Game01\PerformUtil.cpp" />
+    <ClCompile Include="GameIcons.cpp" />
+    <ClCompile Include="GameMusic.cpp" />
+    <ClCompile Include="Global.cpp" />
+    <ClCompile Include="GUILocalString.cpp" />
+    <ClCompile Include="Icon3D.cpp" />
+    <ClCompile Include="IDirectXDraw.Cpp" />
+    <ClCompile Include="IDirectXImage.Cpp" />
+    <ClCompile Include="IDirectXPcx.Cpp" />
+    <ClCompile Include="INITools.cpp" />
+    <ClCompile Include="LightMap.cpp" />
+    <ClCompile Include="MacroHandler.cpp" />
+    <ClCompile Include="MailMan.cpp" />
+    <ClCompile Include="main2.cpp" />
+    <ClCompile Include="Mathieu.cpp" />
+    <ClCompile Include="MD5\MD5Checksum.cpp" />
+    <ClCompile Include="MemMapFile.cpp" />
+    <ClCompile Include="Mouse.cpp" />
+    <ClCompile Include="MouseAction.cpp" />
+    <ClCompile Include="NewFont.cpp" />
+    <ClCompile Include="NewInterface\AnimUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\BoxUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\ButtonUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\ControlUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\DropZoneUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\EditUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\EmptyEvent.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\EventVisitor.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\GameUI.cpp" />
+    <ClCompile Include="NewInterface\GraphUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\GridUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\ListUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\RootBoxUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\ScrollUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\SliderUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\StaticTextUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\TextPageUI.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="NewInterface\V3_AHDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_AHVendreDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_Arene1PlayDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_Arene1WaitDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_ArenePointsDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_AskValueDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_AskValueSldDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_BoutiqueDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_BuyDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_ChatDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_ChatLogDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_ChestDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_ChestNewDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_ComboDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_ConfirmDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_DisplayHelpDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_DisplaySpecialDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_EffectStatusDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_GMDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_GroupeDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_GroupOSDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_GuildChestDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_GuildChestNewDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_GuildDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_InteractionPVP.cpp" />
+    <ClCompile Include="NewInterface\V3_InteractionRP.cpp" />
+    <ClCompile Include="NewInterface\V3_InvDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_ItemInfoDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_LifeDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_MacroDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_MainBarDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_Mp3Dlg.cpp" />
+    <ClCompile Include="NewInterface\V3_OptionsDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_PacmanDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_PanierDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_ProfessionDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_QuestBookP1.cpp" />
+    <ClCompile Include="NewInterface\V3_QuestBookP2.cpp" />
+    <ClCompile Include="NewInterface\V3_QuestBookP3.cpp" />
+    <ClCompile Include="NewInterface\V3_RTMapDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_SmileDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_SpellDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_StatDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_TargetDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_TMIDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_TradeDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_TrainDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_TrainProfDlg.cpp" />
+    <ClCompile Include="NewInterface\V3_VolDlg.cpp" />
+    <ClCompile Include="NewSound.cpp" />
+    <ClCompile Include="NMPlayVideo.cpp" />
+    <ClCompile Include="NMTimerUtils.cpp" />
+    <ClCompile Include="NMVideoCapture.cpp" />
+    <ClCompile Include="NTime.cpp" />
+    <ClCompile Include="Packet.cpp" />
+    <ClCompile Include="packethandling.cpp" />
+    <ClCompile Include="pch.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="Pf.cpp" />
+    <ClCompile Include="Puppet.cpp" />
+    <ClCompile Include="Random.cpp" />
+    <ClCompile Include="RegKeyHandler.cpp" />
+    <ClCompile Include="SaveGame.cpp" />
+    <ClCompile Include="SmoothTile\LayeredTile.cpp" />
+    <ClCompile Include="SmoothTile\SmoothTile.cpp" />
+    <ClCompile Include="SmoothTile\SmoothTileLoader.cpp" />
+    <ClCompile Include="Spell.cpp" />
+    <ClCompile Include="Sprite.cpp" />
+    <ClCompile Include="SysMsg.cpp" />
+    <ClCompile Include="SystemAction.cpp" />
+    <ClCompile Include="SystemInfo.cpp" />
+    <ClCompile Include="TFCObject.cpp" />
+    <ClCompile Include="TFCPacket.cpp" />
+    <ClCompile Include="TFCPlayer.cpp" />
+    <ClCompile Include="TFCSocket.cpp" />
+    <ClCompile Include="Tileset.cpp" />
+    <ClCompile Include="UDP\NMPacketManager.cpp" />
+    <ClCompile Include="UDP\Socket.cpp" />
+    <ClCompile Include="UDP\UDPClient.cpp" />
+    <ClCompile Include="UIMouseEvent.cpp" />
+    <ClCompile Include="Util.cpp" />
+    <ClCompile Include="V2Database.cpp" />
+    <ClCompile Include="V2PalManager.cpp" />
+    <ClCompile Include="V2Sprite.cpp" />
+    <ClCompile Include="version.cpp" />
+    <ClCompile Include="VideoCapture.cpp" />
+    <ClCompile Include="VisualObjectList.cpp" />
+    <ClCompile Include="VKey.cpp" />
+    <ClCompile Include="weather.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="App.h" />
+    <ClInclude Include="Apparence.h" />
+    <ClInclude Include="Audio.h" />
+    <ClInclude Include="Audioio.h" />
+    <ClInclude Include="AutoLock.h" />
+    <ClInclude Include="AviFile.h" />
+    <ClInclude Include="BasicSprite.h" />
+    <ClInclude Include="Bitmap.h" />
+    <ClInclude Include="BlowFish.h" />
+    <ClInclude Include="BoxListing.h" />
+    <ClInclude Include="C2.h" />
+    <ClInclude Include="CombatCursor.h" />
+    <ClInclude Include="Comm.h" />
+    <ClInclude Include="Cs.h" />
+    <ClInclude Include="database2.h" />
+    <ClInclude Include="Dinput.h" />
+    <ClInclude Include="DirectXInput.H" />
+    <ClInclude Include="Disp.h" />
+    <ClInclude Include="DisplayTextBox.h" />
+    <ClInclude Include="EasyMail.h" />
+    <ClInclude Include="encrandom.h" />
+    <ClInclude Include="Formats.h" />
+    <ClInclude Include="FormatText.h" />
+    <ClInclude Include="Franck.h" />
+    <ClInclude Include="Game01\Cases.h" />
+    <ClInclude Include="Game01\PathFinder.h" />
+    <ClInclude Include="Game01\PerformUtil.h" />
+    <ClInclude Include="GameIcons.h" />
+    <ClInclude Include="GameMusic.h" />
+    <ClInclude Include="Global.h" />
+    <ClInclude Include="GUILocalString.h" />
+    <ClInclude Include="Icon3D.h" />
+    <ClInclude Include="IDirectXDraw.h" />
+    <ClInclude Include="IDirectXFont.H" />
+    <ClInclude Include="IDirectXImage.H" />
+    <ClInclude Include="IDirectXPcx.H" />
+    <ClInclude Include="IDirectXSprite.H" />
+    <ClInclude Include="INITools.h" />
+    <ClInclude Include="LightMap.h" />
+    <ClInclude Include="Lock.h" />
+    <ClInclude Include="MacroHandler.h" />
+    <ClInclude Include="MailMan.h" />
+    <ClInclude Include="MD5\MD5Checksum.h" />
+    <ClInclude Include="MD5\MD5ChecksumDefines.h" />
+    <ClInclude Include="MemMapFile.h" />
+    <ClInclude Include="Mouse.h" />
+    <ClInclude Include="MouseAction.h" />
+    <ClInclude Include="NewFont.h" />
+    <ClInclude Include="NewInterface\AnimUI.h" />
+    <ClInclude Include="NewInterface\BoxUI.h" />
+    <ClInclude Include="NewInterface\ButtonUI.h" />
+    <ClInclude Include="NewInterface\ControlUI.h" />
+    <ClInclude Include="NewInterface\DropZoneUI.h" />
+    <ClInclude Include="NewInterface\EditUI.h" />
+    <ClInclude Include="NewInterface\EmptyEvent.h" />
+    <ClInclude Include="NewInterface\EventVisitor.h" />
+    <ClInclude Include="NewInterface\GameUI.h" />
+    <ClInclude Include="NewInterface\GraphUI.h" />
+    <ClInclude Include="NewInterface\GridUI.h" />
+    <ClInclude Include="NewInterface\ListUI.h" />
+    <ClInclude Include="NewInterface\RootBoxUI.h" />
+    <ClInclude Include="NewInterface\SliderUI.h" />
+    <ClInclude Include="NewInterface\StaticTextUI.h" />
+    <ClInclude Include="NewInterface\TextPageUI.h" />
+    <ClInclude Include="NewInterface\V3_AHDlg.h" />
+    <ClInclude Include="NewInterface\V3_AHVendreDlg.h" />
+    <ClInclude Include="NewInterface\V3_Arene1PlayDlg.h" />
+    <ClInclude Include="NewInterface\V3_Arene1WaitDlg.h" />
+    <ClInclude Include="NewInterface\V3_ArenePointsDlg.h" />
+    <ClInclude Include="NewInterface\V3_AskValueDlg.h" />
+    <ClInclude Include="NewInterface\V3_AskValueSldDlg.h" />
+    <ClInclude Include="NewInterface\V3_BoutiqueDlg.h" />
+    <ClInclude Include="NewInterface\V3_BuyDlg.h" />
+    <ClInclude Include="NewInterface\V3_ChatDlg.h" />
+    <ClInclude Include="NewInterface\V3_ChatLogDlg.h" />
+    <ClInclude Include="NewInterface\V3_ChestDlg.h" />
+    <ClInclude Include="NewInterface\V3_ChestNewDlg.h" />
+    <ClInclude Include="NewInterface\V3_ComboDlg.h" />
+    <ClInclude Include="NewInterface\V3_ConfirmDlg.h" />
+    <ClInclude Include="NewInterface\V3_DisplayHelpDlg.h" />
+    <ClInclude Include="NewInterface\V3_DisplaySpecialDlg.h" />
+    <ClInclude Include="NewInterface\V3_EffectStatusDlg.h" />
+    <ClInclude Include="NewInterface\V3_GMDlg.h" />
+    <ClInclude Include="NewInterface\V3_GroupeDlg.h" />
+    <ClInclude Include="NewInterface\V3_GroupOSDlg.h" />
+    <ClInclude Include="NewInterface\V3_GuildChestDlg.h" />
+    <ClInclude Include="NewInterface\V3_GuildChestNewDlg.h" />
+    <ClInclude Include="NewInterface\V3_GuildDlg.h" />
+    <ClInclude Include="NewInterface\V3_InteractionPVP.h" />
+    <ClInclude Include="NewInterface\V3_InteractionRP.h" />
+    <ClInclude Include="NewInterface\V3_InvDlg.h" />
+    <ClInclude Include="NewInterface\V3_ItemInfoDlg.h" />
+    <ClInclude Include="NewInterface\V3_LifeDlg.h" />
+    <ClInclude Include="NewInterface\V3_MacroDlg.h" />
+    <ClInclude Include="NewInterface\V3_MainBarDlg.h" />
+    <ClInclude Include="NewInterface\V3_Mp3Dlg.h" />
+    <ClInclude Include="NewInterface\V3_OptionsDlg.h" />
+    <ClInclude Include="NewInterface\V3_PacmanDlg.h" />
+    <ClInclude Include="NewInterface\V3_PanierDlg.h" />
+    <ClInclude Include="NewInterface\V3_ProfessionDlg.h" />
+    <ClInclude Include="NewInterface\V3_QuestBookP1.h" />
+    <ClInclude Include="NewInterface\V3_QuestBookP2.h" />
+    <ClInclude Include="NewInterface\V3_QuestBookP3.h" />
+    <ClInclude Include="NewInterface\V3_RTMapDlg.h" />
+    <ClInclude Include="NewInterface\V3_SmileDlg.h" />
+    <ClInclude Include="NewInterface\V3_SpellDlg.h" />
+    <ClInclude Include="NewInterface\V3_StatDlg.h" />
+    <ClInclude Include="NewInterface\V3_TargetDlg.h" />
+    <ClInclude Include="NewInterface\V3_TMIDlg.h" />
+    <ClInclude Include="NewInterface\V3_TradeDlg.h" />
+    <ClInclude Include="NewInterface\V3_TrainDlg.h" />
+    <ClInclude Include="NewInterface\V3_TrainProfDlg.h" />
+    <ClInclude Include="NewInterface\V3_VolDlg.h" />
+    <ClInclude Include="NewSound.h" />
+    <ClInclude Include="NMPlayVideo.h" />
+    <ClInclude Include="NMTimerUtils.h" />
+    <ClInclude Include="NMVideoCapture.h" />
+    <ClInclude Include="NTime.h" />
+    <ClInclude Include="ObjectListing.h" />
+    <ClInclude Include="Old.h" />
+    <ClInclude Include="Packet.h" />
+    <ClInclude Include="packethandling.h" />
+    <ClInclude Include="PacketList.h" />
+    <ClInclude Include="PacketTypes.h" />
+    <ClInclude Include="pch.h" />
+    <ClInclude Include="Pf.h" />
+    <ClInclude Include="Proto.h" />
+    <ClInclude Include="Puppet.h" />
+    <ClInclude Include="Random.h" />
+    <ClInclude Include="RegKeyHandler.h" />
+    <ClInclude Include="Resource.h" />
+    <ClInclude Include="SaveGame.h" />
+    <ClInclude Include="ScrollUI.h" />
+    <ClInclude Include="SmoothTile\LayeredTile.h" />
+    <ClInclude Include="SmoothTile\SmoothTile.h" />
+    <ClInclude Include="SmoothTile\SmoothTileLoader.h" />
+    <ClInclude Include="Spell.h" />
+    <ClInclude Include="Sprite.h" />
+    <ClInclude Include="SysMsg.h" />
+    <ClInclude Include="System.h" />
+    <ClInclude Include="SystemAction.h" />
+    <ClInclude Include="SystemInfo.h" />
+    <ClInclude Include="TemplateList.h" />
+    <ClInclude Include="templatequeues.h" />
+    <ClInclude Include="TFCFlag.h" />
+    <ClInclude Include="TFCLanddef.h" />
+    <ClInclude Include="TFCObject.h" />
+    <ClInclude Include="TFCPacket.h" />
+    <ClInclude Include="TFCPlayer.h" />
+    <ClInclude Include="TFCSocket.h" />
+    <ClInclude Include="TileSet.h" />
+    <ClInclude Include="UDP\NMPacketManager.h" />
+    <ClInclude Include="UDP\Socket.h" />
+    <ClInclude Include="UDP\UDPClient.h" />
+    <ClInclude Include="UIMouseEvent.h" />
+    <ClInclude Include="V2Database.h" />
+    <ClInclude Include="V2PalManager.h" />
+    <ClInclude Include="V2Sprite.h" />
+    <ClInclude Include="Vdlist.h" />
+    <ClInclude Include="version.h" />
+    <ClInclude Include="VideoCapture.h" />
+    <ClInclude Include="VisualObjectList.h" />
+    <ClInclude Include="VKey.h" />
+    <ClInclude Include="weather.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="App_icon.ico" />
+    <Image Include="BlackKnight.bmp" />
+    <Image Include="goa.bmp" />
+    <Image Include="icon2.ico" />
+    <Image Include="icon3.ico" />
+    <Image Include="icon4.ico" />
+    <Image Include="icon5.ico" />
+    <Image Include="newpic.bmp" />
+    <Image Include="t4c.ico" />
+    <Image Include="web32x32.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="cur00001.cur" />
+    <None Include="cursor2.cur" />
+    <None Include="WebPatch.exe" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Resources.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Library Include="..\DirectX8Lib\Lib\ddraw.lib" />
+    <Library Include="..\DirectX8Lib\Lib\dinput.lib" />
+    <Library Include="..\DirectX8Lib\Lib\dsound.lib" />
+    <Library Include="..\DirectX8Lib\Lib\dxguid.lib" />
+    <Library Include="..\DirectX8Lib\Lib\strmiids.lib" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="ReleaseNote.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Sound Engine\Sound Engine.vcxproj">
+      <Project>{d2e14882-af37-4fa3-ab30-7d29ddca0efd}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+    <ProjectReference Include="..\T4CConfig\T4CConfig.vcxproj">
+      <Project>{22f2dc15-ee71-4d3d-82fe-c5c0b4912f53}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

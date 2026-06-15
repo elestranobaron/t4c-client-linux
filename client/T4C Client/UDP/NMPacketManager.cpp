@@ -30,6 +30,8 @@ typedef DWORD T4C_IOCP_KEY;
 
 #define  MEM_COMPRESS_NEED(ActualLen) (ULONG)(ActualLen *1.1 + 12);
 
+extern void EnterGameTrace(const char *msg); // DEBUG trace (definie dans Packet.cpp)
+
 
 /*
 bool operator < ( const sockaddr_in &sock1, const sockaddr_in &sock2 )
@@ -257,6 +259,14 @@ int NMPacketManager::GetNbrConnection()
    LeaveCriticalSection(&m_crConnectionLock);
    return iNbr;
 }
+
+void NMPacketManager::ClearAllReceivedPacketIDs()
+{
+   EnterCriticalSection(&m_crConnectionLock);
+   if(m_pUDPClientConnections)
+      m_pUDPClientConnections->ResetReceivedPacketIDs();
+   LeaveCriticalSection(&m_crConnectionLock);
+}
  
 bool NMPacketManager::GetConnectedSockIn(sockaddr_in *pSocketIn)
 {
@@ -279,7 +289,30 @@ int NMPacketManager::ReceiveUDPCallback(sockaddr_in sockAddr,unsigned char* pDat
 
    if( DataLenght < sizeof(PacketHeader) || DataLenght > PACKET_MAX_SIZE)
    {
+      // DEBUG diagnostic : datagramme hors borne (trop petit/trop gros) rejete AVANT tout traitement.
+      if (DataLenght >= 40)
+      {
+         char tb[96];
+         sprintf_s(tb, 96, "UDP rejete (taille) nbuf=%d (min=%d max=%d)",
+                   (int)DataLenght, (int)sizeof(PacketHeader), (int)PACKET_MAX_SIZE);
+         EnterGameTrace(tb);
+      }
       return 0;
+   }
+
+   // DEBUG diagnostic : trace de tout datagramme >= 40 octets recu au plus bas niveau (avant CRC),
+   // pour determiner si les gros paquets (ex. opcode 13 ~90 o, en megapack) arrivent physiquement.
+   if (DataLenght >= 40)
+   {
+      char hex[3 * 12 + 1]; hex[0] = 0;
+      int dn = DataLenght < 12 ? (int)DataLenght : 12;
+      for (int _i = 0; _i < dn; _i++)
+      {
+         char hb[4]; sprintf_s(hb, 4, "%02X ", (unsigned char)pData[_i]); strcat_s(hex, sizeof(hex), hb);
+      }
+      char tb[128];
+      sprintf_s(tb, 128, "UDP recu nbuf=%d bytes=[%s]", (int)DataLenght, hex);
+      EnterGameTrace(tb);
    }
    
    UDPPacket *pPacket = me->PacketAlloc(DataLenght);
@@ -298,6 +331,13 @@ int NMPacketManager::ReceiveUDPCallback(sockaddr_in sockAddr,unsigned char* pDat
          if(!bCheckSumOK)
          {
             AddToLogFile(TRUE,"   -> Invalid Checksum\n");
+            // DEBUG diagnostic : un datagramme arrive mais est jete au CRC -> reparable cote client.
+            if (DataLenght >= 40)
+            {
+               char tb[96];
+               sprintf_s(tb, 96, "UDP rejete (CRC) nbuf=%d", (int)DataLenght);
+               EnterGameTrace(tb);
+            }
             me->PacketFree(pPacket); //RECV Le Packet a un MAUVAIS, traiter et detruit.
             return 0;
          }
@@ -385,7 +425,11 @@ void NMPacketManager::UDPProcessPacketFct(LPVOID lpData)
       
       DWORD dwFoo = 0;
       T4C_IOCP_KEY dwPacketAddr = 0;
+#if defined(LINUX_PORT) && !defined(_WIN32)
       void* lpOverlapped = NULL;
+#else
+      OVERLAPPED* lpOverlapped = NULL;
+#endif
       
         
       UDPPacket* pPacket=NULL;
@@ -412,12 +456,25 @@ void NMPacketManager::UDPProcessPacketFct(LPVOID lpData)
             me->m_dwNbrPacketRecv++;
             LeaveCriticalSection(&me->m_crConnectionLock);
             //AddToLogFile(TRUE,"-> Register PacketID %d\n",pPacket->pHeader->ushID);
+            // DEBUG diagnostic : ID accepte (pour correler les collisions de dedup).
+            if (pPacket->ulBufferLength >= 12)
+            {
+               char tb[96];
+               sprintf_s(tb, 96, "DEDUP OK ushID=%d nbuf=%d", (int)pPacket->pHeader->ushID, (int)pPacket->ulBufferLength);
+               EnterGameTrace(tb);
+            }
             me->AnalyzePacket( pPacket );
          }
          else
          {
             me->m_dwNbrPacketRecvAlreadyRegistred++;
             LeaveCriticalSection(&me->m_crConnectionLock);
+            // DEBUG diagnostic : paquet jete car son ushID est deja dans l'historique de dedup.
+            char tb[96];
+            sprintf_s(tb, 96, "DEDUP DROP ushID=%d nbuf=%d%s",
+                      (int)pPacket->pHeader->ushID, (int)pPacket->ulBufferLength,
+                      lpConnection ? "" : " (conn NULL)");
+            EnterGameTrace(tb);
          }
          
          //Packet a ete recu, traiter et detruit.
@@ -439,7 +496,11 @@ void NMPacketManager::UDPSendPacketFct(LPVOID lpData)
       
       DWORD dwFoo               = 0;
       T4C_IOCP_KEY dwPacketAddr = 0;
+#if defined(LINUX_PORT) && !defined(_WIN32)
       void* lpOverlapped = NULL;
+#else
+      OVERLAPPED* lpOverlapped = NULL;
+#endif
       
      
       BOOL bRet = GetQueuedCompletionStatus( me->m_hUDPSendPacketIO, &dwFoo, &dwPacketAddr, &lpOverlapped, WAIT_QUEUE_MAX ) ;
@@ -549,7 +610,11 @@ void NMPacketManager::UDPLostConnectionThread(LPVOID lpData)
    {
       DWORD dwFoo = 0;
       T4C_IOCP_KEY dwPacketAddr = 0;
+#if defined(LINUX_PORT) && !defined(_WIN32)
       void* lpOverlapped = NULL;
+#else
+      OVERLAPPED* lpOverlapped = NULL;
+#endif
 
       CUDPConnection* pConnection = NULL;
       BOOL bRet = FALSE;
@@ -1227,6 +1292,14 @@ inline bool CUDPConnection::AlreadyReceivedPacket(unsigned short ushPacketID)
 
    }while (iCnt != iEnd);
    return false;
+}
+
+void CUDPConnection::ResetReceivedPacketIDs()
+{
+   // Reinitialise le buffer circulaire de dedup : aucun ID n'est plus considere comme « deja recu ».
+   for (int i = 0; i < NBR_RECEIVED_REGISTRED_ID; i++)
+      m_lReceivedPacketID[i] = -1;
+   m_ushOffsetID = 0;
 }
 
 inline bool CUDPConnection::AddPending(UDPPacket* pPending) 

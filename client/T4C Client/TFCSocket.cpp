@@ -237,6 +237,7 @@ bool ConnectionThreadFinished = false;
 //NMNMNM Connection
 extern BOOL         g_bSecondLoadComplete;
 extern BOOL         g_bSmoothFloorLoading;
+extern void         EnterGameTrace(const char *msg); // DEBUG trace (Packet.cpp)
 extern void         SecondInitObject(LPVOID pParam);
 extern void         SmoothInitObject(LPVOID pParam);
 extern void         DrawSecondLoadingText();
@@ -740,6 +741,11 @@ void TFCSocket::MainThread(void) {
     int LastType = 0;
     
     BOOL bSendPreGame = FALSE;
+    // Retry de PutPlayerInGame (opcode 13) ? calque sur le client Linux (T4CLoginSession.cpp L3256).
+    // La reponse opcode 13 du serveur Linux peut se perdre (UDP) ; sans relance le client reste
+    // bloque a l'infini sur l'ecran de loading. On renvoie la requete tant que WantPreGame est vrai.
+    DWORD dwPutPlayerSentAt = 0;
+    int   iPutPlayerRetry   = 0;
     
     char *KBuffer = new char [256];
     memset(KBuffer, 0, 256);
@@ -795,12 +801,27 @@ void TFCSocket::MainThread(void) {
           
           TFCPacket Send;
           bSendPreGame = TRUE;
+
+          // Bascule pre-jeu -> en-jeu : le serveur repart sur une sequence d'ID paquet independante.
+          // Les IDs en-jeu (bas) collisionnent avec ceux deja enregistres pendant le pre-jeu, ce qui
+          // faisait jeter l'opcode 13 (et l'inview) comme ? doublons ? par la dedup NM -> blocage au
+          // loading. On vide l'historique de dedup ici pour accepter la sequence en-jeu.
+          if (COMM.Ctr)
+             COMM.Ctr->ClearAllReceivedPacketIDs();
+
           Send << (short)RQ_PutPlayerInGame;
 
 
           Send << (char)strlen(MenuName);
           Send << (char *)MenuName;
           Send << (long)Player.lKey;
+
+          {
+             char tb[160];
+             sprintf_s(tb, 160, "===== ENVOI PutPlayerInGame perso='%s' key=%ld =====",
+                       MenuName, (long)Player.lKey);
+             EnterGameTrace(tb);
+          }
           
           strcpy_s(Player.Name,256, MenuName);
 
@@ -825,7 +846,39 @@ void TFCSocket::MainThread(void) {
           
           
           SEND_PACKET(Send);
+          dwPutPlayerSentAt = timeGetTime();
+          iPutPlayerRetry   = 0;
           Sleep(250);
+       }
+
+       // Retry PutPlayerInGame si la reponse (opcode 13) n'arrive pas ? comme le client Linux.
+       // Tant que WantPreGame est vrai, c'est que le handler opcode 13 (Packet.cpp) n'a pas encore
+       // bascule en jeu : on relance la requete. Le serveur (boPreInGame) renvoie alors StartPutPlayerInGame
+       // (TFCMessagesHandler.cpp L6557). 3 s = delai d'ACK serveur pour ce paquet ; max 5 essais.
+       if (WantPreGame && bSendPreGame && dwPutPlayerSentAt != 0)
+       {
+          if ((timeGetTime() - dwPutPlayerSentAt) > 3000)
+          {
+             if (iPutPlayerRetry < 5)
+             {
+                iPutPlayerRetry++;
+                TFCPacket SendRetry;
+                SendRetry << (short)RQ_PutPlayerInGame;
+                SendRetry << (char)strlen(MenuName);
+                SendRetry << (char *)MenuName;
+                SendRetry << (long)Player.lKey;
+                SEND_PACKET(SendRetry);
+                dwPutPlayerSentAt = timeGetTime();
+                char tb[96];
+                sprintf_s(tb, 96, "retry PutPlayerInGame (13) %d/5", iPutPlayerRetry);
+                EnterGameTrace(tb);
+             }
+             else
+             {
+                dwPutPlayerSentAt = 0; // abandon : on arrete de relancer (le timeout COMM gerera la suite)
+                EnterGameTrace("timeout PutPlayerInGame apres 5 essais");
+             }
+          }
        }
        
        
@@ -1872,7 +1925,7 @@ void TFCSocket::ConnectionThread(void)
          //SetTextColor(hdc,RGB(255,255,255));
 
          //Copyright
-         sprintf_s(strTmp,512,"2002-2012+ ©Copyright Dialsoft Inc. All right reserved.");
+         sprintf_s(strTmp,512,"2002-2012+ ?Copyright Dialsoft Inc. All right reserved.");
          //nom du server
          int iTextW = V3_BtnFontB->GetFLen(hdc, strTmp);
          V3_BtnFontB->DrawFont(hdc, (g_Global.GetScreenW()-iTextW)/2  ,  g_Global.GetScreenH()-20  , CL_WHITE        , 0, strTmp);
@@ -2039,17 +2092,17 @@ void TFCSocket::ConnectionThread(void)
                dwVal = (g_Global.GetScreenW()-dwVal)/2;
                fT4CDef_23B->DrawFont(hdc, dwVal  ,  g_Global.GetScreenH()-120  , g_DefColorD        , 0, "Welcome on T4C !   Default configuration used...   You can use T4CConfig.exe to setup the game.");
 
-               dwVal = V3_BtnFontB->GetFLen(hdc, "Bienvenue sur T4C !   La configuration par défaut est utilisé...   Utilisez T4CConfig.exe pour configurer le jeu.");
+               dwVal = V3_BtnFontB->GetFLen(hdc, "Bienvenue sur T4C !   La configuration par d?faut est utilis?...   Utilisez T4CConfig.exe pour configurer le jeu.");
                dwVal = (g_Global.GetScreenW()-dwVal)/2;
-               fT4CDef_23B->DrawFont(hdc, dwVal  ,  g_Global.GetScreenH()-100  , g_DefColorD        , 0, "Bienvenue sur T4C !   La configuration par défaut est utilisé...   Utilisez T4CConfig.exe pour configurer le jeu.");
+               fT4CDef_23B->DrawFont(hdc, dwVal  ,  g_Global.GetScreenH()-100  , g_DefColorD        , 0, "Bienvenue sur T4C !   La configuration par d?faut est utilis?...   Utilisez T4CConfig.exe pour configurer le jeu.");
 
-               dwVal = V3_BtnFontB->GetFLen(hdc, "Willkommen auf T4C !   Default-Konfiguration verwendet... Sie können T4CConfig.exe zur Einrichtung Spiels.");
+               dwVal = V3_BtnFontB->GetFLen(hdc, "Willkommen auf T4C !   Default-Konfiguration verwendet... Sie k?nnen T4CConfig.exe zur Einrichtung Spiels.");
                dwVal = (g_Global.GetScreenW()-dwVal)/2;
-               fT4CDef_23B->DrawFont(hdc, dwVal  ,  g_Global.GetScreenH()-80  , g_DefColorD        , 0, "Willkommen auf T4C !   Default-Konfiguration verwendet... Sie können T4CConfig.exe zur Einrichtung Spiels.");
+               fT4CDef_23B->DrawFont(hdc, dwVal  ,  g_Global.GetScreenH()-80  , g_DefColorD        , 0, "Willkommen auf T4C !   Default-Konfiguration verwendet... Sie k?nnen T4CConfig.exe zur Einrichtung Spiels.");
 
 
                //MessageBox(NULL,"Welcome on T4C !\nPlease proceed to the basic configuration before launching the game.\n\n"\
-               //   "Bienvenue sur T4C !\nVeuillez procéder à la configuration de base avant le lancement du jeu.\n\n"\
+               //   "Bienvenue sur T4C !\nVeuillez proc?der ? la configuration de base avant le lancement du jeu.\n\n"\
                //   "Willkommen T4C !\nBitte fahren Sie mit der Grundkonfiguration vor dem Start des Spiels"
 
             }
@@ -2697,6 +2750,29 @@ void COMMCallBack(COMM_INTR_PROTOTYPE)
    
    // Creation du Message a prtir du Buffer.
    Msg->SetBuffer(lpbBuffer, nBufferSize);
+
+   // DEBUG: trace de tout paquet recu au niveau callback (avant dispatch), avec l'etat COMM.
+   {
+      short tt = 0;
+      try { Msg->Get((short *)&tt); Msg->Seek(-2, 1); } catch (...) {}
+      if (tt != 10)
+      {
+         // Dump brut des 1ers octets du buffer recu (avant parsing) pour diagnostiquer le cadrage.
+         char hex[3 * 24 + 1];
+         hex[0] = 0;
+         int dumpN = nBufferSize < 24 ? nBufferSize : 24;
+         for (int _i = 0; _i < dumpN; _i++)
+         {
+            char hb[4];
+            sprintf_s(hb, 4, "%02X ", (unsigned char)lpbBuffer[_i]);
+            strcat_s(hex, sizeof(hex), hb);
+         }
+         char tb[256];
+         sprintf_s(tb, 256, "CB recu type=%d state=%d nbuf=%d bytes=[%s]",
+                   (int)tt, (int)COMM.State, (int)nBufferSize, hex);
+         EnterGameTrace(tb);
+      }
+   }
    
    
    if (COMM.State == 1) 
@@ -3978,7 +4054,7 @@ void TFCSocket::MenuThread(void)
    Credits.SetText("<>");
    Credits.SetText("Quentin [Moen] Mansuy");
    Credits.SetText("<>");
-   Credits.SetText("Martin [Marae] Dubé");
+   Credits.SetText("Martin [Marae] Dub?");
    Credits.SetText("<>");
    Credits.SetText("<>");
    Credits.SetText("<>");
@@ -4180,20 +4256,20 @@ void TFCSocket::MenuThread(void)
    unsigned char VSKey[15];
 
    VSKey[0] = ' ';
-   VSKey[1] = 'ä';
-   VSKey[2] = 'ï';
-   VSKey[3] = 'ë';
-   VSKey[4] = 'ö';
-   VSKey[5] = 'ü';
-   VSKey[6] = 'é';
-   VSKey[7] = 'è';
-   VSKey[8] = 'à';
-   VSKey[9] = 'ù';
-   VSKey[10] = 'â';
-   VSKey[11] = 'î';
-   VSKey[12] = 'ê';
-   VSKey[13] = 'ô';
-   VSKey[14] = 'û';
+   VSKey[1] = '?';
+   VSKey[2] = '?';
+   VSKey[3] = '?';
+   VSKey[4] = '?';
+   VSKey[5] = '?';
+   VSKey[6] = '?';
+   VSKey[7] = '?';
+   VSKey[8] = '?';
+   VSKey[9] = '?';
+   VSKey[10] = '?';
+   VSKey[11] = '?';
+   VSKey[12] = '?';
+   VSKey[13] = '?';
+   VSKey[14] = '?';
 
 
   
@@ -4423,7 +4499,7 @@ void TFCSocket::MenuThread(void)
             //SetTextColor(hdc,RGB(255,255,255));
             
             //Copyright
-            sprintf_s(strTmp,512,"2002-2012+ ©Copyright Dialsoft Inc. All right reserved.");
+            sprintf_s(strTmp,512,"2002-2012+ ?Copyright Dialsoft Inc. All right reserved.");
             //nom du server
             int iTextW = V3_BtnFontB->GetFLen(hdc, strTmp);
             V3_BtnFontB->DrawFont(hdc, (g_Global.GetScreenW()-iTextW)/2  ,  g_Global.GetScreenH()-20  , CL_WHITE        , 0, strTmp);
@@ -5349,7 +5425,7 @@ void TFCSocket::MenuThread(void)
             fSmallNormal_13->DrawFont(hdc, iXBox+(480-fSmallNormal_13->GetFLen(hdc, g_LocalString[711]))/2  ,  iYBox+166  , CL_WHITE        , 0, g_LocalString[711]);
 
             //Copyright
-            sprintf_s(strTmp,512,"2002-2012+ ©Copyright Dialsoft Inc. All right reserved.");
+            sprintf_s(strTmp,512,"2002-2012+ ?Copyright Dialsoft Inc. All right reserved.");
             V3_BtnFontB->DrawFont(hdc, (g_Global.GetScreenW()-V3_BtnFontB->GetFLen(hdc, strTmp))/2  ,  g_Global.GetScreenH()-20  , CL_WHITE        , 0, strTmp);
             
             DXDReleaseDC(hdc, 17);
@@ -6127,7 +6203,7 @@ void TFCSocket::MenuThread(void)
                      }
                     
 
-                     //äïëöüéèàùâîêôû
+                     //??????????????
                      if(   bKeyOK )
                      {
                         char Temp[2];

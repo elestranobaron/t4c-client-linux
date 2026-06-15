@@ -1,169 +1,107 @@
-// Implements template queues for general uses
+// TemplateQueues.h: FIFO queue (Virtual Dreams Library style)
+//
+#if !defined(AFX_TEMPLATEQUEUES_H__B5F32863_E0F7_11D0_A876_00E029058624__INCLUDED_)
+#define AFX_TEMPLATEQUEUES_H__B5F32863_E0F7_11D0_A876_00E029058624__INCLUDED_
 
-#pragma warning( disable : 4291 )
+#if _MSC_VER >= 1000
+#pragma once
+#endif // _MSC_VER >= 1000
 
-#ifndef __TEMPLATE_QUEUES
-#define __TEMPLATE_QUEUES
-
-//#define DEBUG_NEW	 new    (__FILE__, __LINE__)
-//#define new			DEBUG_NEW
-
-#ifndef NULL
- #define NULL 0
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
 #endif
+#include <windows.h>
 
-template <class T> class TemplateQueue;
+template <class ObjectType> class TemplateQueue;
 
-template <class T>
-class TemplateQueueObject{
-      friend TemplateQueue<T>;
+template <class ObjectType>
+class TemplateQueueObject {
+	friend TemplateQueue<ObjectType>;
 
-public:
-      TemplateQueueObject();
-      ~TemplateQueueObject();
+	private:
+		TemplateQueueObject *Greater;
 
-      TemplateQueueObject *Next;
-      T *Pointer;
+	public:
+		TemplateQueueObject(void);
+		ObjectType *Pointer;
 };
 
-template <class T>
-class TemplateQueue{
-public:
-      TemplateQueue();
-      ~TemplateQueue();
+template <class ObjectType>
+class TemplateQueue {
+	private:
+		TemplateQueueObject<ObjectType> *Head;
+		TemplateQueueObject<ObjectType> *Tail;
+		int nb_objects;
 
-      T *ViewNext();
-      T *ViewNextNext();
+	public:
+		TemplateQueue(void);
+		~TemplateQueue(void);
 
-      void AddToQueue(T *NewObject);
-	   DWORD NbObjects();
+		void AddToQueue(ObjectType *obj);
+		void AddToQueue(ObjectType &obj);
 
-
-      T *Retreive(BOOL = TRUE);
-
-private:
-      DWORD nb_obj;
-	  TemplateQueueObject<T> *Current;
-      TemplateQueueObject<T> *QueueEnd;
+		ObjectType *Retreive(BOOL boDelete = TRUE);
+		int NbObjects(void);
 };
 
-////////////////////////////////////////////////////////////////////////////
-// Constructor
-template <class T>
-TemplateQueueObject<T>::TemplateQueueObject() : Next(NULL), Pointer(NULL){
+template <class ObjectType>
+TemplateQueueObject<ObjectType>::TemplateQueueObject(void) : Greater(0) {
 }
 
-////////////////////////////////////////////////////////////////////////////
-// Destructor
-template <class T>
-TemplateQueueObject<T>::~TemplateQueueObject(){
+template <class ObjectType>
+TemplateQueue<ObjectType>::TemplateQueue(void) : Head(0), Tail(0), nb_objects(0) {
 }
 
-template <class T>
-DWORD TemplateQueue<T>::NbObjects(){
-	return nb_obj;
-} 
-
-////////////////////////////////////////////////////////////////////////////
-// Constructor
-template <class T>
-TemplateQueue<T>::TemplateQueue() : Current(NULL), QueueEnd(NULL) {
-	nb_obj = 0;
-}
-////////////////////////////////////////////////////////////////////////////
-// Destructor
-template <class T>
-TemplateQueue<T>::~TemplateQueue(){
-// Retreives all objects from the queue. Since queues are floating, it will
-// not delete the object pointers
-	T *Obj = NULL;
-	
-	Obj = Retreive();
-	while(Obj) {
-		delete Obj;
-		Obj = Retreive();
-	};
+template <class ObjectType>
+TemplateQueue<ObjectType>::~TemplateQueue(void) {
+	while (Retreive()) {
+	}
 }
 
-////////////////////////////////////////////////////////////////////////////
-// Returns the current object (next to be retreived) without retreiving it
-template <class T>
-T *TemplateQueue<T>::ViewNext(){
-  if(Current)
-     return Current->Pointer;
+template <class ObjectType>
+void TemplateQueue<ObjectType>::AddToQueue(ObjectType *obj) {
+	TemplateQueueObject<ObjectType> *TempObject = new TemplateQueueObject<ObjectType>;
+	TempObject->Pointer = obj;
+	TempObject->Greater = 0;
 
-return NULL;
-}
-////////////////////////////////////////////////////////////////////////////
-// Returns the next object (after the current)
-template <class T>
-T *TemplateQueue<T>::ViewNextNext(){
-  if(Current)
-     if(Current->Next)
-         return Current->Next->Pointer;
-
-return NULL;
-}
-////////////////////////////////////////////////////////////////////////////
-// Add an object to the queue
-template <class T>
-void TemplateQueue<T>::AddToQueue(T *object){
-	nb_obj++;
-	// Creates a new object pointing to the object to be queued
-	TemplateQueueObject<T> *NewObj = new TemplateQueueObject<T>;
-	NewObj->Pointer = object;  // point to added object
-	NewObj->Next = NULL;       // will become the end of the queue
-
-	// If there is at least one object in the queue
-   if(QueueEnd){
-     // Make the last object now point to the new one
-     QueueEnd->Next = NewObj;
-     // Then make the new object the end of the queue
-     QueueEnd = NewObj;
-   }else{
-     // Else create a new 'queue'
-     QueueEnd = NewObj;
-     Current  = NewObj;
-   }
+	if (!Head) {
+		Head = Tail = TempObject;
+	} else {
+		Tail->Greater = TempObject;
+		Tail = TempObject;
+	}
+	nb_objects++;
 }
 
+template <class ObjectType>
+void TemplateQueue<ObjectType>::AddToQueue(ObjectType &obj) {
+	AddToQueue(&obj);
+}
 
-////////////////////////////////////////////////////////////////////////////
-// Retreives (removes from the queue) the next object
-template <class T>
-	T *TemplateQueue<T>::Retreive(BOOL Remove){
-	T *ReturnObj = NULL;
-	
-	// If queue is empty, return NULL
-	if(!Current) return NULL;
-
-	// Else well, return the current object :)
-	ReturnObj = Current->Pointer;
-
-   if (!Remove)
-   // If Object is not remove from the queue.
-      return ReturnObj;
-
-   // If there is only one object in the queue
-	if(Current == QueueEnd){
-		 delete Current;  // delete the current object
-		Current  = NULL;
-		QueueEnd = NULL;
-	}else{
-	// Well, if the queue has more then one object..
-		 // Creates a temp object to later delete it
-		 TemplateQueueObject<T> *TmpObj;
-		TmpObj  = Current;
-		// cannot be NULL, since we already tested for end-of-queue
-		Current = Current->Next;
-		delete TmpObj;
+template <class ObjectType>
+ObjectType *TemplateQueue<ObjectType>::Retreive(BOOL boDelete) {
+	if (!Head) {
+		return NULL;
 	}
 
-   nb_obj--;
-   return ReturnObj;
+	ObjectType *obj = Head->Pointer;
+
+	if (boDelete) {
+		TemplateQueueObject<ObjectType> *TempObject = Head;
+		Head = Head->Greater;
+		if (!Head) {
+			Tail = 0;
+		}
+		delete TempObject;
+		nb_objects--;
+	}
+
+	return obj;
 }
 
-#undef new
-#undef DEBUG_NEW
+template <class ObjectType>
+int TemplateQueue<ObjectType>::NbObjects(void) {
+	return nb_objects;
+}
 
-#endif
+#endif // !defined(AFX_TEMPLATEQUEUES_H__B5F32863_E0F7_11D0_A876_00E029058624__INCLUDED_)

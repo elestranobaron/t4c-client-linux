@@ -4346,13 +4346,50 @@ BOOL DecriptVSB(BOOL f, int S)
    char strPersoDir[2048];
    if(SHGetSpecialFolderPath(NULL,strPersoDir,CSIDL_PERSONAL   ,FALSE) != 1)
       GetTempPath(MAX_PATH,strPersoDir);
-   strcat_s(strPersoDir,2048,"\\Dialsoft\\T4CDEV\\Sounds\\");
+   {
+      char strDialsoftDir[2048];
+      char strDevDir[2048];
+      sprintf_s(strDialsoftDir,2048,"%s\\Dialsoft",strPersoDir);
+      CreateDirectory(strDialsoftDir,NULL);
+      sprintf_s(strDevDir,2048,"%s\\T4CDEV",strDialsoftDir);
+      CreateDirectory(strDevDir,NULL);
+      sprintf_s(strPersoDir,2048,"%s\\Sounds\\",strDevDir);
+      CreateDirectory(strPersoDir,NULL);
+   }
 
    char strVSBFile[2048];
    sprintf_s(strVSBFile,2048,"%sT4CGameFile.VSB",strPersoDir);
    char strVSBDataTmp[2048];
    sprintf_s(strVSBDataTmp,2048,"%sData.Dat",strPersoDir);
-   
+
+   if (!f)
+   {
+      FILE *hVsb = NULL;
+      FILE *hInfo = NULL;
+      fopen_s(&hVsb,strVSBFile,"rb");
+      fopen_s(&hInfo,"Game Files\\VSBInfo.Txt","rb");
+      if (hVsb && hInfo)
+      {
+         char infoLine[256];
+         if (fgets(infoLine,256,hInfo))
+         {
+            const int expectedSize = atoi(infoLine);
+            if (expectedSize > 0)
+            {
+               fseek(hVsb,0,SEEK_END);
+               const long fileSize = ftell(hVsb);
+               if (fileSize == expectedSize)
+               {
+                  fclose(hVsb);
+                  fclose(hInfo);
+                  return TRUE;
+               }
+            }
+         }
+      }
+      if (hVsb) fclose(hVsb);
+      if (hInfo) fclose(hInfo);
+   }
 
 	// Init Custom variable (some are useless)
    init_variable();
@@ -4389,14 +4426,8 @@ BOOL DecriptVSB(BOOL f, int S)
 	vsb   = NULL;
    fopen_s(&vsb,strVSBFile, "wb");
 
-   if (!vsb) {
-      char *lpMsgBuf;
-      FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,    NULL,
-         GetLastError(), MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
-         (LPTSTR) &lpMsgBuf,    0,    NULL );// Display the string.
-      //OutputDebugString(lpMsgBuf);
-      free(lpMsgBuf);
-   }
+   if (!index || !data2 || !data3 || !vsb)
+      return FALSE;
 
    int TELL;
 

@@ -26,6 +26,13 @@ extern CSaveGame g_SaveGame;
 
 DWORD g_dwLastMacroCallStat = 0;
 
+// Pose des le debut du constructeur pour qu'un GetInstance() concurrent (thread de rendu/HUD pendant
+// que le thread reseau construit l'instance, ou inversement) renvoie l'instance-en-cours-de-construction
+// au lieu de bloquer sur le guard d'init statique thread-safe de VS2022 (/Zc:threadSafeInit, absent du
+// build VC6/VC8 d'origine). Sans ca, ce guard inter-bloque avec le verrou UI (RootBoxUI) -> deadlock du
+// thread reseau lors d'un RQ_HPchanged recu avant la fin de l'entree (serveur Linux) -> blocage au loading.
+static V3_StatsDlg* g_pStatsDlgInstance = NULL;
+
 
 const int STRid = 1;
 const int ENDid = 2;
@@ -82,6 +89,8 @@ MOnglet07Button(tabMacroEvent            ,g_GUILocalString[315],g_DefColorH ),
 MOnglet08Button(tabOptionEvent           ,g_GUILocalString[316],g_DefColorH ),
 skillList( skillEvent )
 {
+   g_pStatsDlgInstance = this;
+
    int i=0;
    InitSound();
 
@@ -405,6 +414,10 @@ V3_StatsDlg *V3_StatsDlg::GetInstance( void )
 //  Returns the side menu instance.
 //////////////////////////////////////////////////////////////////////////////////////////
 {
+    // Renvoie l'instance en cours de construction lors d'un appel concurrent/re-entrant,
+    // avant que le guard magic-static ci-dessous ne se (self-)bloque (cf. g_pStatsDlgInstance).
+    if (g_pStatsDlgInstance)
+       return g_pStatsDlgInstance;
 
     static V3_StatsDlg instance;
     return &instance;

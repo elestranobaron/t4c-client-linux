@@ -130,6 +130,12 @@ public:
    
    int  GetNbrConnection();
 
+   // Vide l'historique des IDs recus (dedup) de toutes les connexions. A appeler a la bascule
+   // pre-jeu -> en-jeu : le serveur repart sur une sequence d'ID independante, et les IDs en-jeu
+   // (bas) collisionnent avec ceux deja enregistres en pre-jeu -> paquets d'entree (opcode 13)
+   // jetes a tort comme doublons. Ce reset evite ces faux doublons.
+   void ClearAllReceivedPacketIDs();
+
   
 protected:
    
@@ -230,6 +236,7 @@ public:
    inline WORD GetPacketSplitID();
    inline void RegisterReceivedPacketID(unsigned short usgPacketID);
    inline bool AlreadyReceivedPacket(unsigned short ushPacketID);
+   void ResetReceivedPacketIDs(); // Vide l'historique de dedup (bascule de phase : IDs serveur reinitialises)
 
 
    inline bool AddPending(UDPPacket* pPending); // Add this packet to the list of 'waiting for ack' packets

@@ -565,7 +565,11 @@ void V3_ChatDlg::ChannelListEvent::LeftClicked( void )
            {
               if( _stricmp( (*j).channelID.c_str(), channelUI->channelID.c_str() ) == 0 )
               {
-                 (*j).bActive = channelUI->listenState;
+                 RegChannel ch = *j;
+                 ch.bActive = channelUI->listenState;
+                 me->regChannels.erase( j );
+                 me->regChannels.insert( ch );
+                 break;
               }
            }
         }
@@ -634,7 +638,11 @@ void V3_ChatDlg::ChannelListEvent::LeftDblClicked( void )
         {
             if( _stricmp( (*j).channelID.c_str(), channelUI->channelID.c_str() ) == 0 )
             {
-                (*j).color = channelUI->channelColor;
+                RegChannel ch = *j;
+                ch.color = channelUI->channelColor;
+                me->regChannels.erase( j );
+                me->regChannels.insert( ch );
+                break;
             }
         }
     }

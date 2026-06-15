@@ -12,8 +12,16 @@ using namespace std;
 
 #define V2NMSDATABASE_PALETTE  "Game Files\\V2NMSColorI.dpd"
 
+// Registered at the very start of the constructor so a re-entrant GetInstance()
+// (the constructor calls m_plRefPal.LoadPalette -> Sprite::LoadPalette -> GetInstance)
+// returns the instance-under-construction instead of deadlocking on the VS2022
+// thread-safe static-init guard (/Zc:threadSafeInit, absent in the original VC6/VC8 build).
+static CV2PalManager* g_pPalManagerInstance = NULL;
+
 CV2PalManager::CV2PalManager()
 {
+   g_pPalManagerInstance = this;
+
    //load V2 data file
    char   strChksumMd5[33];
    char   *pstrMD5Part2 = &strChksumMd5[16];
@@ -225,6 +233,10 @@ LPBYTE CV2PalManager::GetPalIndex(const char *lpszID, int PalNb)
 
 CV2PalManager* CV2PalManager::GetInstance(void) 
 {
+   // Return the under-construction instance during the constructor's re-entrant call,
+   // before the magic-static guard below would otherwise self-deadlock.
+   if (g_pPalManagerInstance)
+      return g_pPalManagerInstance;
    static CV2PalManager pmInstance;
    return &pmInstance;
 }
@@ -232,7 +244,7 @@ CV2PalManager* CV2PalManager::GetInstance(void)
 unsigned char  CV2PalManager::CalcChecksumComp2(unsigned char	*pData, unsigned long dwNbrData)
 {
    if(!pData || dwNbrData <=0)
-      return 0x00; // pas de données a calculer
+      return 0x00; // pas de donnes a calculer
    
    unsigned char chkSum;
    unsigned char sumByte = 0x00;
