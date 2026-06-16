@@ -66,8 +66,16 @@ Le binaire est produit dans `client/T4C Client/Release/T4C Client.exe`.
 1. Récupérer les assets runtime (voir **Assets runtime** ci-dessus).
 2. Copier l'exécutable dans `runtime/` (à côté des assets) :
 
+Avec Powershell
+
 ```powershell
 Copy-Item "client\T4C Client\Release\T4C Client.exe" "runtime\T4C Client.exe" -Force
+```
+
+Avec Command MS-DOS
+
+```powershell
+copy "client\T4C Client\Release\T4C Client.exe" runtime
 ```
 
 3. Lancer `runtime/T4C Client.exe`.
