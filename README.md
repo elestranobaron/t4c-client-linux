@@ -51,9 +51,10 @@ Les deux builds sont **indépendants** (pas de SDL requis sur Windows, pas de Di
 
 Ouvrir `client/T4C Client.sln` puis générer en **`Release | Win32`**, ou en ligne de commande :
 
+Dans un invite de commande MS-DOS
+t4c-client-linux>
 ```powershell
-& "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
-  "client\T4C Client.sln" /t:Build /p:Configuration=Release
+"C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" "client\T4C Client.sln" /t:Build /p:Configuration=Release
 ```
 
 > Le flag `/Zc:threadSafeInit-` est **requis** (déjà dans le `.vcxproj`) : il restaure la sémantique d'init des `static` locales de l'ère VC6 et évite les interblocages d'initialisation introduits par VS2022.
