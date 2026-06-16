@@ -52,7 +52,7 @@ Les deux builds sont **indépendants** (pas de SDL requis sur Windows, pas de Di
 Ouvrir `client/T4C Client.sln` puis générer en **`Release | Win32`**, ou en ligne de commande :
 
 ```powershell
-& "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" `
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
   "client\T4C Client.sln" /t:Build /p:Configuration=Release
 ```
 
