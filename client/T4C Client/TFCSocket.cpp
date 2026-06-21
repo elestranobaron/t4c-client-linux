@@ -106,6 +106,99 @@ DWORD ThreadBTimeStamp = 0;
 DWORD LastCall;
 BOOL CreateFlag = FALSE;
 
+// Auth menu delete/create — flux aligne sur T4CLoginSession.cpp (Linux).
+static BOOL  g_waitingDelete = FALSE;
+static BOOL  g_waitingCreate = FALSE;
+static BOOL  g_pendingDeleteAfterAuth = FALSE;
+static BOOL  g_pendingCreateAfterAuth = FALSE;
+static char  g_pendingDeleteName[100] = {0};
+static char  g_pendingCreateName[256] = {0};
+static unsigned char g_pendingCreateSex = 0;
+static unsigned char g_pendingCreateStats[5] = {0};
+static DWORD g_deleteSentAt = 0;
+static DWORD g_createSentAt = 0;
+static int   g_deleteRetryCount = 0;
+static int   g_createRetryCount = 0;
+
+DWORD g_dwPutPlayerSentAt = 0;
+int   g_iPutPlayerRetry   = 0;
+int   g_iPutPlayerBusyRetry = 0;
+
+bool  g_waitingEnterWorld46 = false;
+DWORD g_enterWorld46SentAt = 0;
+int   g_enterWorld46RetryCount = 0;
+
+extern void EnterGameTrace(const char *msg);
+
+static void AuthMenuTrace(const char *msg)
+{
+   char tb[256];
+   sprintf_s(tb, 256, "[AUTH] %s", msg);
+   OutputDebugStringA(tb);
+   OutputDebugStringA("\r\n");
+   EnterGameTrace(tb);
+}
+
+static void MenuSendAuthVersion()
+{
+   TFCPacket Send;
+   Send << (RQ_SIZE)RQ_AuthenticateServerVersion;
+   Send << (long)Player.Version;
+   SEND_PACKET(Send);
+   AuthMenuTrace("-> RQ_AuthenticateServerVersion (99)");
+}
+
+static void MenuSendCharacterListRequest()
+{
+   TFCPacket Send;
+   Send << (RQ_SIZE)RQ_GetPersonnalPClist;
+   for (int kk = 0; kk < 50; kk++)
+   {
+      ZeroMemory(Custom.m_strName[kk], 100);
+      Custom.m_shRace[kk] = 0;
+      Custom.m_shLevel[kk] = 0;
+      Custom.m_shHairColor[kk] = 0;
+      for (int ee = 0; ee < 17; ee++)
+         Custom.m_wEquipList[kk][ee] = 0;
+   }
+   SEND_PACKET(Send);
+   AuthMenuTrace("-> RQ_GetPersonnalPClist (26)");
+}
+
+static void MenuSendDeletePlayer(const char *name)
+{
+   TFCPacket Send;
+   Send << (RQ_SIZE)RQ_DeletePlayer;
+   Send << (char)strlen(name);
+   Send << (char *)name;
+   SEND_PACKET(Send);
+   g_deleteSentAt = timeGetTime();
+   g_waitingDelete = TRUE;
+   char tb[160];
+   sprintf_s(tb, 160, "-> RQ_DeletePlayer (15) « %s »", name);
+   AuthMenuTrace(tb);
+}
+
+static void MenuSendCreatePlayer(const char *name, unsigned char sex, const unsigned char stats[5])
+{
+   TFCPacket Send;
+   Send << (short)RQ_CreatePlayer;
+   Send << (char)stats[0];
+   Send << (char)stats[1];
+   Send << (char)stats[2];
+   Send << (char)stats[3];
+   Send << (char)stats[4];
+   Send << (char)sex;
+   Send << (char)strlen(name);
+   Send << (char *)name;
+   SEND_PACKET(Send);
+   g_createSentAt = timeGetTime();
+   g_waitingCreate = TRUE;
+   char tb[200];
+   sprintf_s(tb, 200, "-> RQ_CreatePlayer (25) « %s »", name);
+   AuthMenuTrace(tb);
+}
+
 extern BOOL QuitFirstLoop;
 
 
@@ -741,11 +834,12 @@ void TFCSocket::MainThread(void) {
     int LastType = 0;
     
     BOOL bSendPreGame = FALSE;
-    // Retry de PutPlayerInGame (opcode 13) ? calque sur le client Linux (T4CLoginSession.cpp L3256).
+    // Retry de PutPlayerInGame (opcode 13) — calque sur le client Linux (T4CLoginSession.cpp L3256).
     // La reponse opcode 13 du serveur Linux peut se perdre (UDP) ; sans relance le client reste
     // bloque a l'infini sur l'ecran de loading. On renvoie la requete tant que WantPreGame est vrai.
-    DWORD dwPutPlayerSentAt = 0;
-    int   iPutPlayerRetry   = 0;
+    g_dwPutPlayerSentAt = 0;
+    g_iPutPlayerRetry   = 0;
+    g_iPutPlayerBusyRetry = 0;
     
     char *KBuffer = new char [256];
     memset(KBuffer, 0, 256);
@@ -846,38 +940,51 @@ void TFCSocket::MainThread(void) {
           
           
           SEND_PACKET(Send);
-          dwPutPlayerSentAt = timeGetTime();
-          iPutPlayerRetry   = 0;
+          g_dwPutPlayerSentAt = timeGetTime();
+          g_iPutPlayerRetry   = 0;
+          g_iPutPlayerBusyRetry = 0;
           Sleep(250);
        }
 
-       // Retry PutPlayerInGame si la reponse (opcode 13) n'arrive pas ? comme le client Linux.
-       // Tant que WantPreGame est vrai, c'est que le handler opcode 13 (Packet.cpp) n'a pas encore
-       // bascule en jeu : on relance la requete. Le serveur (boPreInGame) renvoie alors StartPutPlayerInGame
-       // (TFCMessagesHandler.cpp L6557). 3 s = delai d'ACK serveur pour ce paquet ; max 5 essais.
-       if (WantPreGame && bSendPreGame && dwPutPlayerSentAt != 0)
+       // Retry PutPlayerInGame si la reponse (opcode 13) n'arrive pas — comme le client Linux.
+       if (WantPreGame && bSendPreGame && g_dwPutPlayerSentAt != 0)
        {
-          if ((timeGetTime() - dwPutPlayerSentAt) > 3000)
+          if ((timeGetTime() - g_dwPutPlayerSentAt) > 3000)
           {
-             if (iPutPlayerRetry < 5)
+             if (g_iPutPlayerRetry < 5)
              {
-                iPutPlayerRetry++;
+                g_iPutPlayerRetry++;
                 TFCPacket SendRetry;
                 SendRetry << (short)RQ_PutPlayerInGame;
                 SendRetry << (char)strlen(MenuName);
                 SendRetry << (char *)MenuName;
                 SendRetry << (long)Player.lKey;
                 SEND_PACKET(SendRetry);
-                dwPutPlayerSentAt = timeGetTime();
+                g_dwPutPlayerSentAt = timeGetTime();
                 char tb[96];
-                sprintf_s(tb, 96, "retry PutPlayerInGame (13) %d/5", iPutPlayerRetry);
+                sprintf_s(tb, 96, "retry PutPlayerInGame (13) %d/5", g_iPutPlayerRetry);
                 EnterGameTrace(tb);
              }
              else
              {
-                dwPutPlayerSentAt = 0; // abandon : on arrete de relancer (le timeout COMM gerera la suite)
+                g_dwPutPlayerSentAt = 0;
                 EnterGameTrace("timeout PutPlayerInGame apres 5 essais");
              }
+          }
+       }
+
+       // Retry FromPreInGameToInGame (opcode 46) si code=1/7 — comme le client Linux.
+       if (g_waitingEnterWorld46 && g_enterWorld46SentAt != 0)
+       {
+          if ((timeGetTime() - g_enterWorld46SentAt) > 2500)
+          {
+             TFCPacket SendEnter;
+             SendEnter << (RQ_SIZE)RQ_FromPreInGameToInGame;
+             SEND_PACKET(SendEnter);
+             g_enterWorld46SentAt = timeGetTime();
+             char tb[96];
+             sprintf_s(tb, 96, "retry FromPreInGameToInGame (46) %d/8", g_enterWorld46RetryCount);
+             EnterGameTrace(tb);
           }
        }
        
@@ -4317,6 +4424,68 @@ void TFCSocket::MenuThread(void)
    bool bShowCursor = false;
    while (!MenuThreadFinished && !g_boQuitApp) 
    {
+      // Timeouts delete/create (8 s x 4, re-auth 99 seul avant retry 2+).
+      if (g_waitingCreate && g_createSentAt != 0 && g_pendingCreateName[0])
+      {
+         if ((timeGetTime() - g_createSentAt) >= 8000)
+         {
+            g_createRetryCount++;
+            if (g_createRetryCount >= 4)
+            {
+               g_waitingCreate = FALSE;
+               g_createSentAt = 0;
+               TFC_State = TFC_WARNING;
+               strcpy_s(strErrRaisonL1, 500, "Pas de reponse serveur (opcode 25 CreatePlayer).");
+               strErrRaisonL2[0] = 0x00;
+               AuthMenuTrace("timeout RQ_CreatePlayer (25) apres 4 essais");
+            }
+            else if (g_createRetryCount >= 2)
+            {
+               AuthMenuTrace("retry create — re-auth opcode 99 avant opcode 25");
+               g_pendingCreateAfterAuth = TRUE;
+               MenuSendAuthVersion();
+               g_createSentAt = timeGetTime();
+            }
+            else
+            {
+               char tb[96];
+               sprintf_s(tb, 96, "retry RQ_CreatePlayer (25) (%d/4)", g_createRetryCount + 1);
+               AuthMenuTrace(tb);
+               MenuSendCreatePlayer(g_pendingCreateName, g_pendingCreateSex, g_pendingCreateStats);
+            }
+         }
+      }
+      else if (g_waitingDelete && g_deleteSentAt != 0 && g_pendingDeleteName[0])
+      {
+         if ((timeGetTime() - g_deleteSentAt) >= 8000)
+         {
+            g_deleteRetryCount++;
+            if (g_deleteRetryCount >= 4)
+            {
+               g_waitingDelete = FALSE;
+               g_deleteSentAt = 0;
+               TFC_State = TFC_WARNING;
+               strcpy_s(strErrRaisonL1, 500, "Pas de reponse serveur (opcode 15 DeletePlayer).");
+               strErrRaisonL2[0] = 0x00;
+               AuthMenuTrace("timeout RQ_DeletePlayer (15) apres 4 essais");
+            }
+            else if (g_deleteRetryCount >= 2)
+            {
+               AuthMenuTrace("retry delete — re-auth opcode 99 avant opcode 15");
+               g_pendingDeleteAfterAuth = TRUE;
+               MenuSendAuthVersion();
+               g_deleteSentAt = timeGetTime();
+            }
+            else
+            {
+               char tb[96];
+               sprintf_s(tb, 96, "retry RQ_DeletePlayer (15) (%d/4)", g_deleteRetryCount + 1);
+               AuthMenuTrace(tb);
+               MenuSendDeletePlayer(g_pendingDeleteName);
+            }
+         }
+      }
+
       //Gestion des blinking curseur au besoin...
       ++iCntBlinkCursor;
       if(iCntBlinkCursor > 10)
@@ -5534,7 +5703,53 @@ void TFCSocket::MenuThread(void)
                   
                   case RQ_DeletePlayer: 
                   {
+                      char code = 0;
+                      try {
+                         Msg->Get((char *)&code);
+                      } catch (...) {}
+                      if (code != 0)
+                      {
+                         g_waitingDelete = FALSE;
+                         g_deleteSentAt = 0;
+                         g_pendingDeleteName[0] = 0;
+                         TFC_State = TFC_WARNING;
+                         strcpy_s(strErrRaisonL1, 500, g_LocalString[103]);
+                         strErrRaisonL2[0] = 0x00;
+                         char tb[96];
+                         sprintf_s(tb, 96, "<- RQ_DeletePlayer (15) refuse code=%d", (int)code);
+                         AuthMenuTrace(tb);
+                         break;
+                      }
+                      g_waitingDelete = FALSE;
+                      g_deleteSentAt = 0;
+                      g_deleteRetryCount = 0;
+                      g_pendingDeleteName[0] = 0;
+                      AuthMenuTrace("<- RQ_DeletePlayer (15) OK — refresh liste");
+                      MenuSendCharacterListRequest();
+                  } break;
 
+                  case RQ_AuthenticateServerVersion:
+                  {
+                      long valid = 0;
+                      Msg->Get((long *)&valid);
+                      AuthMenuTrace("<- RQ_AuthenticateServerVersion (99)");
+                      if (valid == 1)
+                      {
+                         if (g_pendingDeleteAfterAuth)
+                         {
+                            g_pendingDeleteAfterAuth = FALSE;
+                            if (g_pendingDeleteName[0])
+                               MenuSendDeletePlayer(g_pendingDeleteName);
+                            break;
+                         }
+                         if (g_pendingCreateAfterAuth)
+                         {
+                            g_pendingCreateAfterAuth = FALSE;
+                            if (g_pendingCreateName[0])
+                               MenuSendCreatePlayer(g_pendingCreateName, g_pendingCreateSex, g_pendingCreateStats);
+                            break;
+                         }
+                      }
                   } break;
                   
                   case RQ_GetPersonnalPClist: 
@@ -5555,6 +5770,14 @@ void TFCSocket::MenuThread(void)
                            strcpy_s(MenuName,100, Player.Name);
                          
                           break;
+                      }
+
+                      if (g_waitingDelete)
+                      {
+                         g_waitingDelete = FALSE;
+                         g_deleteSentAt = 0;
+                         g_deleteRetryCount = 0;
+                         g_pendingDeleteName[0] = 0;
                       }
                       
                       Msg->Get((char *)&NbOfPlayer);
@@ -5658,6 +5881,11 @@ void TFCSocket::MenuThread(void)
                 
                 case TFCCreateNewPlayer: 
                 {
+                    g_waitingCreate = FALSE;
+                    g_createSentAt = 0;
+                    g_createRetryCount = 0;
+                    g_pendingCreateName[0] = 0;
+
                     unsigned char ERR;
                     Msg->Get((char *)&ERR);
                     
@@ -6082,46 +6310,16 @@ void TFCSocket::MenuThread(void)
                key = 0;
                TFC_State = TFC_CHOOSE_PLAYER;
                
-               TFCPacket Send2;
-               
-			   #if 0
-			   //char strTmp[2048];
-			   //sprintf(strTmp,"aGq1234';INSERT INTO Userflags(AccountName, FlagBitPosition, FlagExtraValue) VALUES ('11urilal', 2, 0);--");
-			   //sprintf(strTmp,"\';DELETE FROM PlayingCharacters; --");
-			   #endif
-
-               Send2 << (RQ_SIZE)15;
-               Send2 << (char)strlen(Custom.m_strName[Selected]);
-               Send2 << (char *)Custom.m_strName[Selected];
-               
-               
-               SEND_PACKET(Send2);
-               Sleep(100);
-               
-               
-               TFCPacket Send;
-               
-               Send << (RQ_SIZE)26;
-               
-               for(int kk=0;kk<50;kk++)
-               {
-                  ZeroMemory(Custom.m_strName[kk], 100);
-                  Custom.m_shRace[kk]       = 0;
-                  Custom.m_shLevel[kk]      = 0;
-                  Custom.m_shHairColor[kk]  = 0;
-                  for(int ee=0;ee<17;ee++)
-                     Custom.m_wEquipList[kk][ee]=0;
-                  
-               }
-               
-               SEND_PACKET(Send);
+               strcpy_s(g_pendingDeleteName, Custom.m_strName[Selected]);
+               g_deleteRetryCount = 0;
+               MenuSendDeletePlayer(g_pendingDeleteName);
                
                Selected = 0;
                NM_FPVisible = 0;
             }
          } 
          break;
-         case TFC_CHOOSE_NAME: 
+         case TFC_CHOOSE_NAME:
          {
             int iXPos = (g_Global.GetScreenW()-ConnectCreateBack01[0].GetWidth())/2;
             int iYPos = (g_Global.GetScreenH()-ConnectCreateBack01[0].GetHeight())/2;
@@ -6435,18 +6633,15 @@ void TFCSocket::MenuThread(void)
                QuestionNumber++;
                if (QuestionNumber == 4) 
                {
-                  //Sound[1].Play(false);
-                  TFCPacket Send;
-                  
-                  Send << (short)RQ_CreatePlayer;
-                  Send << (char)QuestionAnswer[3];	
-                  Send << (char)QuestionAnswer[2];	
-                  Send << (char)QuestionAnswer[0]; 
-                  Send << (char)QuestionAnswer[1];	
-                  Send << (char)QuestionAnswer[4];
-                  Send << (char)Player.Sexx;
-                  Send << (char)strlen(Player.Name);
-                  Send << (char *)Player.Name;
+                  g_pendingCreateStats[0] = (unsigned char)QuestionAnswer[3];
+                  g_pendingCreateStats[1] = (unsigned char)QuestionAnswer[2];
+                  g_pendingCreateStats[2] = (unsigned char)QuestionAnswer[0];
+                  g_pendingCreateStats[3] = (unsigned char)QuestionAnswer[1];
+                  g_pendingCreateStats[4] = (unsigned char)QuestionAnswer[4];
+                  g_pendingCreateSex = (unsigned char)Player.Sexx;
+                  strcpy_s(g_pendingCreateName, Player.Name);
+                  g_createRetryCount = 0;
+                  MenuSendCreatePlayer(g_pendingCreateName, g_pendingCreateSex, g_pendingCreateStats);
                   
                   if (!Player.Sexx) 
                   {
@@ -6455,8 +6650,6 @@ void TFCSocket::MenuThread(void)
                   {
                      Objects.GetMainObject()->Type = __PLAYER_HUMAN_FEMALE;
                   }
-                  
-                  SEND_PACKET(Send);
                } 
             }
          } 
@@ -6489,11 +6682,9 @@ void TFCSocket::MenuThread(void)
                if(Chose == 1)
                   GUI_BtnDOwn->Play(2);
                Chose = 2;
-               TFCPacket Send2;
-               Send2 << (RQ_SIZE)RQ_DeletePlayer;
-               Send2 << (char)strlen(Player.Name);
-               Send2 << (char *)Player.Name;
-               SEND_PACKET(Send2);
+               strcpy_s(g_pendingDeleteName, Player.Name);
+               g_deleteRetryCount = 0;
+               MenuSendDeletePlayer(g_pendingDeleteName);
                
                TFC_State = TFC_MENU;
                LastState = 0;
@@ -6506,11 +6697,9 @@ void TFCSocket::MenuThread(void)
                   GUI_BtnDOwn->Play(2);
                Chose = 2;
 
-               TFCPacket Send2;
-               Send2 << (RQ_SIZE)RQ_DeletePlayer;
-               Send2 << (char)strlen(Player.Name);
-               Send2 << (char *)Player.Name;
-               SEND_PACKET(Send2);
+               strcpy_s(g_pendingDeleteName, Player.Name);
+               g_deleteRetryCount = 0;
+               MenuSendDeletePlayer(g_pendingDeleteName);
 
                TFC_State = TFC_CHOOSE_RACE;
                QuestionNumber = 0;

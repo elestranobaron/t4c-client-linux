@@ -185,6 +185,16 @@ extern bool LevelUp;
 
 extern bool WantPreGame;
 
+extern DWORD g_dwPutPlayerSentAt;
+extern int   g_iPutPlayerRetry;
+extern int   g_iPutPlayerBusyRetry;
+
+extern bool  g_waitingEnterWorld46;
+extern DWORD g_enterWorld46SentAt;
+extern int   g_enterWorld46RetryCount;
+
+extern void EnterGameTrace(const char *msg);
+
 extern bool bDisplayList;
 extern char DisplayList[25][100];
 extern int  DisplayInt[25];
@@ -6215,14 +6225,32 @@ void HandlePacket(TFCPacket *Msg)
               EnterGameTrace(tb);
            }
            
+           unsigned char ERR;
+           Msg->Get((char *)&ERR);
+           if (ERR != 0)
+           {
+              if (ERR == 7 && g_iPutPlayerBusyRetry < 4)
+              {
+                 g_iPutPlayerBusyRetry++;
+                 g_dwPutPlayerSentAt = timeGetTime() - 2000;
+                 char tb[96];
+                 sprintf_s(tb, 96, "13: ERR=7 busy — retry %d/4", g_iPutPlayerBusyRetry);
+                 EnterGameTrace(tb);
+                 break;
+              }
+              WantPreGame = false;
+              char tb[64];
+              sprintf_s(tb, 64, "13: ERR=%u fatal", (unsigned)ERR);
+              EnterGameTrace(tb);
+              break;
+           }
+
            WantPreGame = false;
            Sleep(200);
            unsigned long High = 0;
            unsigned long Low = 0;
            
-           unsigned char ERR;
-           Msg->Get((char *)&ERR);
-           EnterGameTrace("13: ERR lu");
+           EnterGameTrace("13: ERR=0 OK");
            Msg->Get((long  *)&Player.FactionID);
            Msg->Get((long  *)&Player.ID);
            Msg->Get((short *)&Player.xPos);
@@ -6283,6 +6311,9 @@ void HandlePacket(TFCPacket *Msg)
               TFCPacket SendEnter;
               SendEnter << (RQ_SIZE)RQ_FromPreInGameToInGame;
               SEND_PACKET(SendEnter);
+              g_waitingEnterWorld46 = true;
+              g_enterWorld46SentAt = timeGetTime();
+              g_enterWorld46RetryCount = 0;
            }
            EnterGameTrace("13: 46 envoye (proactif)");
 

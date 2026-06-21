@@ -7,6 +7,23 @@ Familles : **Décision**, **Assets**, **Build**, **Réseau**, **Rendu**, **Serve
 
 ---
 
+## 2026-06-21 16:30:00 — FIX client Windows : delete/create auth menu + opcode 46/13
+
+**Famille : Réseau / Client Windows**
+
+Symptôme : après delete/create depuis le menu Windows, le serveur logue `paquet 25/26 ignore — joueur NULL` ; feuille de skills absente après création.
+
+**Cause :** le client Windows envoyait opcode **15 + 26 dans le même tick** (sans attendre la réponse 15). Retry auth envoyait **99 + 15/25 ensemble** → session UDP détruite côté serveur.
+
+**Client Windows (`TFCSocket.cpp`, `Packet.cpp`, `packethandling.cpp`)**
+- Delete : opcode **15 seul** → réponse OK → **26** ; timeout 8 s × 4 ; re-auth **99 seul** puis 15 après réponse 99 (`g_pendingDeleteAfterAuth`).
+- Create : idem pour **25** (`g_pendingCreateAfterAuth`).
+- PutPlayerInGame : **ERR=7** → retry (~1 s, max 4), pas erreur fatale.
+- FromPreInGameToInGame (46) : `g_Var.inGame=true` uniquement si **code=0** ; retry si code **1/7** (max 8).
+- Logs debug `[AUTH]` via `AuthMenuTrace` / `EnterGameTrace`.
+
+---
+
 ## 2026-06-21 15:00:00 — FIX opcode 46 picklock + client code=1 (régression entrée monde)
 
 **Famille : Réseau / Serveur**

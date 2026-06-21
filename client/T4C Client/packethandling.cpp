@@ -50,6 +50,11 @@ extern bool goodSeraph;
 extern T3VSBSound SoundFX[250];
 extern DWORD TargetID;
 
+extern bool  g_waitingEnterWorld46;
+extern DWORD g_enterWorld46SentAt;
+extern int   g_enterWorld46RetryCount;
+extern void  EnterGameTrace(const char *msg);
+
 extern int TalkToX, TalkToY, TalkToW;
 extern unsigned long TalkToID;
 extern DWORD SelectedID;
@@ -358,6 +363,39 @@ void PacketHandling::TeleportPlayer(TFCPacket *Msg) {
 void PacketHandling::FromPreInGameToInGame(TFCPacket *Msg) {
     // Send to Server when loading is finsih... receive from ser er for a confirmation.
     try {
+
+        char code = 0;
+        try {
+           Msg->Get((char *)&code);
+        } catch (...) {}
+
+        {
+           char tb[96];
+           sprintf_s(tb, 96, "<- FromPreInGameToInGame (46) code=%d", (int)code);
+           EnterGameTrace(tb);
+        }
+
+        if (code != 0)
+        {
+           if ((code == 1 || code == 7) && g_enterWorld46RetryCount < 8)
+           {
+              g_enterWorld46RetryCount++;
+              g_waitingEnterWorld46 = true;
+              g_enterWorld46SentAt = timeGetTime() - 2000;
+              char tb[96];
+              sprintf_s(tb, 96, "46: code=%d — retry %d/8", (int)code, g_enterWorld46RetryCount);
+              EnterGameTrace(tb);
+              return;
+           }
+           g_waitingEnterWorld46 = false;
+           g_enterWorld46SentAt = 0;
+           EnterGameTrace("46: echec fatal — pas de inGame");
+           return;
+        }
+
+        g_waitingEnterWorld46 = false;
+        g_enterWorld46SentAt = 0;
+        g_enterWorld46RetryCount = 0;
 
         // If the player is a seraph, play the seraph sound
         DoNotMove = FALSE;
