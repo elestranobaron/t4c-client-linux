@@ -150,6 +150,24 @@ inline int strcpy_s(char *dest, size_t destsz, const char *src) {
 }
 #endif
 
+#ifndef strcat_s
+inline int strcat_s(char *dest, size_t destsz, const char *src) {
+    if (!dest || destsz == 0) {
+        return EINVAL;
+    }
+    if (!src) {
+        return EINVAL;
+    }
+    const size_t used = std::strlen(dest);
+    if (used >= destsz) {
+        dest[destsz - 1] = '\0';
+        return ERANGE;
+    }
+    std::strncat(dest, src, destsz - used - 1);
+    return 0;
+}
+#endif
+
 #ifndef sprintf_s
 #define sprintf_s(buf, sz, ...) std::snprintf((buf), (sz), __VA_ARGS__)
 #endif

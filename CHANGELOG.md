@@ -7,6 +7,124 @@ Familles : **Décision**, **Assets**, **Build**, **Réseau**, **Rendu**, **Serve
 
 ---
 
+## 2026-06-21 15:00:00 — FIX opcode 46 picklock + client code=1 (régression entrée monde)
+
+**Famille : Réseau / Serveur**
+
+**Logs typiques :**
+```
+[PutPlayerInGame] load_character -> code 0
+[FromPreInGameToInGame] async: UsePicklock refuse
+[Session] joueur inconnu IP …
+```
+
+**Cause :** même bug picklock que opcode 13, mais sur **46** (async tentait `UsePicklock` sans que le sync l'ait pris). Le client traitait **code=1 comme succès** → envoi moves/60 alors que le serveur restait `preInGame=1`.
+
+**Serveur**
+- `RQFUNC_FromPreInGameToInGame` : `UsePicklock` avant enqueue async ; async ne re-acquiert plus.
+- Picklock sync refusé → réponse **46 code=7** (busy).
+
+**Client**
+- Succès **46 uniquement si code=0** ; code 1/7 → retry (max 8).
+
+Recompiler client **et** serveur.
+
+---
+
+## 2026-06-21 14:00:00 — FIX régression PutPlayerInGame erreur 7 (picklock Linux)
+
+**Famille : Réseau / Serveur**
+
+**Cause :** sur Linux, `RQFUNC_PutPlayerInGame` libérait le picklock juste après `Call(Async…)` alors que l'async tentait de le reprendre → **erreur 7** (busy). Le `ClearAllReceivedPacketIDs()` sur chaque 13 rendait cette erreur visible même pour un perso existant.
+
+**Serveur**
+- Ne plus `UseUnlock` après le `Call` async (aligné Windows) ; l'async libère via `AutoExit`.
+- Suppression du second `UsePicklock` en tête de `AsyncRQFUNC_PutPlayerInGame`.
+
+**Client**
+- `ClearAllReceivedPacketIDs()` **uniquement** dans `TryAutoEnterWorldAfterCreateList` (flux create), pas depuis la sélection perso.
+- Retry automatique si réponse **7** (picklock busy), max 4 fois.
+
+Recompiler client **et** serveur.
+
+---
+
+## 2026-06-21 12:00:00 — Entrée après création + reroll stats : dedup 13, auth 13/26, dés serveur
+
+**Famille : Réseau / Serveur**
+
+**Client Linux (`T4CLoginSession.cpp`)**
+- `ClearAllReceivedPacketIDs()` avant chaque envoi `RQ_PutPlayerInGame` (13) — aligné Windows `TFCSocket.cpp` ; évite le rejet de la réponse 13 par la dédup NM après la rafale 25/31/26.
+
+**Serveur Linux (`TFCMessagesHandler.cpp`)**
+- `RefreshAuthMenuRegistration()` au début des handlers **13** et **26** — si `key!=0` et menu auth, remet `registred=TRUE` avant `load_character` async.
+
+**Serveur (`Character.cpp`)**
+- `roll_stats()` : restauration formule de dés (`rnd(0,4)+6+bRoll*`) à la place du hardcode `SetSTR(20)` … `SetWIS(20)`.
+
+Recompiler client **et** serveur.
+
+---
+
+## 2026-06-21 03:15:00 — FIX régression delete/create : gate registred + retry opcode 99
+
+**Famille : Réseau / Serveur**
+
+**Cause racine identifiée dans les logs :**
+```
+[AUTH] GetPersonnalPClist (26) registred=1
+[PKT] paquet 15 ignore — registred=0   ← bloqué AVANT le handler
+```
+L'opcode **26** passait avec `bValidRegister=false`, pas le **15** (ni 25). De plus le retry client envoyait opcode **99 + 15 dans le même tick** ; la réponse 99 relançait une **liste persos** au lieu du delete → session détruite (`joueur NULL`).
+
+**Serveur**
+- `bValidRegister=false` aussi pour opcodes **15, 25, 31** (comme 26).
+- Suppression de `GetPlayerResourceFctForAuthMenu` (migration IP dangereuse).
+- `RefreshAuthMenuRegistration()` : si `key!=0` et pas in_game → remet `registred=TRUE`.
+
+**Client**
+- Retry delete/create : opcode 99 seul, puis **15/25 après réponse 99** (`g_pendingDeleteAfterAuth`).
+
+**Build serveur** : fix compile — `RefreshAuthMenuRegistration` déplacée avant `RQFUNC_AuthenticateServerVersion` (C++ exige déclaration avant usage).
+
+---
+
+## 2026-06-21 03:00:00 — Suppression perso (opcode 15) : session UDP perdue + timeout client
+
+**Famille : Réseau / Serveur**
+
+Symptôme : `[PKT] paquet 15/26 ignore — joueur NULL (IP …:52672)` — le serveur ne trouvait pas la session auth (match IP **et** port strict `SAME_IP`), souvent après création async réussie côté serveur mais sans réponse client.
+
+**Serveur**
+- `GetPlayerResourceFctForAuthMenu` : opcodes menu auth (15/25/26/99/13/31…) — repli même IP si port UDP changé + migration `IPaddrO`.
+- Logs + réponses erreur sur `RQ_DeletePlayer` (comme create).
+
+**Client**
+- Flux delete : opcode 15 seul, puis 26 après réponse OK (comme Windows).
+- Timeout 8 s × 4 retries + re-auth 99 avant retry 2+.
+- Log `[PHASE] ->/<- RQ_DeletePlayer (15)`.
+
+---
+
+## 2026-06-21 02:30:00 — Création perso bloquée (opcode 25) : logs serveur + timeout client
+
+**Famille : Réseau / Serveur**
+
+Symptôme : après le questionnaire, l'écran reste sur « attente opcode 25 » ; le client logue `[CharacterCreate] RQ_CreatePlayer` mais **aucune trace serveur** (le handler n'avait pas de `fprintf` — absence de log ≠ paquet absent).
+
+**Client Linux (`T4CLoginSession.cpp`)**
+- Log réseau `[PHASE] -> RQ_CreatePlayer (25)` à l'envoi (comme opcode 13/26).
+- Timeout 8 s × 4 retries (comme PutPlayerInGame) ; message d'erreur UX si pas de réponse.
+
+**Serveur Linux (`TFCMessagesHandler.cpp`, `PacketManager.cpp`)**
+- Log stderr à la réception de opcode 25 + refus (`registred=0`, `in_game`, picklock occupé).
+- Réponse opcode 25 avec code erreur (5/6) au lieu de silence.
+- Log stderr si paquet 25/15 ignoré (`registred=0` ou joueur NULL).
+
+Recompiler client **et** serveur pour tester contre `172.104.251.211:11677`.
+
+---
+
 ## 2026-06-15 22:27:00 — ✅ CONFIRMÉ EN JEU : entrée des mondes réussie (serveur Linux)
 
 **Famille : Réseau / Rendu / Build**

@@ -59,7 +59,16 @@ std::atomic<bool> g_waitingPutPlayer{false};
 std::atomic<Uint32> g_putPlayerSentAt{0};
 std::atomic<int> g_putPlayerRetryCount{0};
 std::atomic<bool> g_waitingCreate{false};
+std::atomic<Uint32> g_createSentAt{0};
+std::atomic<int> g_createRetryCount{0};
+unsigned char g_pendingCreateStats[5]{};
+unsigned char g_pendingCreateSex{0};
 std::atomic<bool> g_waitingDelete{false};
+std::atomic<Uint32> g_deleteSentAt{0};
+std::atomic<int> g_deleteRetryCount{0};
+std::atomic<bool> g_pendingDeleteAfterAuth{false};
+std::atomic<bool> g_pendingCreateAfterAuth{false};
+std::string g_pendingDeleteName;
 std::atomic<bool> g_waitingReroll{false};
 std::atomic<bool> g_inCreateRerollPhase{false};
 std::atomic<bool> g_autoEnterWorldAfterCreate{false};
@@ -258,6 +267,8 @@ void FailAuthPhase(const char *message) {
 
 void SendPacket(TFCPacket &pkt);
 void SendPutPlayerInGame(const std::string &name);
+void SendCreatePlayerPacket(const std::string &name, unsigned char sex, const unsigned char stats[5]);
+void SendDeletePlayerPacket(const std::string &name);
 void SendOpcodeOnly(short opcode);
 
 /** Comme finalstep/client : RQ_SafePlug (123) + octet 0 — amorce deconnexion antiplug. */
@@ -335,7 +346,13 @@ void ResetLoginSessionState() {
     g_putPlayerSentAt.store(0);
     g_putPlayerRetryCount.store(0);
     g_waitingCreate.store(false);
+    g_createSentAt.store(0);
+    g_createRetryCount.store(0);
     g_waitingDelete.store(false);
+    g_deleteSentAt.store(0);
+    g_deleteRetryCount.store(0);
+    g_pendingDeleteAfterAuth.store(false);
+    g_pendingCreateAfterAuth.store(false);
     g_waitingReroll.store(false);
     g_inCreateRerollPhase.store(false);
     g_inGame.store(false);
@@ -1802,6 +1819,18 @@ void SetCreatePlayerError(unsigned char code) {
     std::snprintf(buf, sizeof(buf), "Creation refusee (code %u)", static_cast<unsigned>(code));
     g_createError = buf;
     g_waitingCreate.store(false);
+    g_createSentAt.store(0);
+    g_createRetryCount.store(0);
+    g_pendingCreateAfterAuth.store(false);
+}
+
+void SetCreatePlayerErrorMessage(const std::string &msg) {
+    std::lock_guard<std::mutex> lock(g_errMutex);
+    g_createError = msg;
+    g_waitingCreate.store(false);
+    g_createSentAt.store(0);
+    g_createRetryCount.store(0);
+    g_pendingCreateAfterAuth.store(false);
 }
 
 void SetDeletePlayerError(unsigned char code) {
@@ -1810,6 +1839,20 @@ void SetDeletePlayerError(unsigned char code) {
     std::snprintf(buf, sizeof(buf), "Suppression refusee (code %u)", static_cast<unsigned>(code));
     g_deleteError = buf;
     g_waitingDelete.store(false);
+    g_deleteSentAt.store(0);
+    g_deleteRetryCount.store(0);
+    g_pendingDeleteName.clear();
+    g_pendingDeleteAfterAuth.store(false);
+}
+
+void SetDeletePlayerErrorMessage(const std::string &msg) {
+    std::lock_guard<std::mutex> lock(g_errMutex);
+    g_deleteError = msg;
+    g_waitingDelete.store(false);
+    g_deleteSentAt.store(0);
+    g_deleteRetryCount.store(0);
+    g_pendingDeleteName.clear();
+    g_pendingDeleteAfterAuth.store(false);
 }
 
 void TryAutoEnterWorldAfterCreateList() {
@@ -1827,6 +1870,10 @@ void TryAutoEnterWorldAfterCreateList() {
         g_activePlayer = {};
         g_activePlayer.name = name;
         g_activePlayer.valid = true;
+    }
+    /* Reset dedup NM uniquement apres create/reroll (rafale 25/31/26 avant le 13). */
+    if (COMM.Ctr) {
+        COMM.Ctr->ClearAllReceivedPacketIDs();
     }
     SendPutPlayerInGame(name);
 }
@@ -1892,6 +1939,36 @@ void SendPutPlayerInGame(const std::string &name) {
                            n.c_str(), static_cast<long>(g_sessionKey));
 }
 
+void SendCreatePlayerPacket(const std::string &name, unsigned char sex, const unsigned char stats[5]) {
+    TFCPacket p;
+    p << static_cast<short>(RQ_CreatePlayer);
+    for (int i = 0; i < 5; ++i) {
+        p << static_cast<char>(stats[i]);
+    }
+    p << static_cast<char>(sex);
+    std::string n = name.substr(0, 255);
+    p << static_cast<char>(n.size());
+    p << const_cast<char *>(n.c_str());
+    SendPacket(p);
+    g_createSentAt.store(SDL_GetTicks());
+    T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase,
+                           "[PHASE] -> RQ_CreatePlayer (25) « %s » (%s) stats=%u,%u,%u,%u,%u",
+                           n.c_str(), sex ? "F" : "M", static_cast<unsigned>(stats[0]),
+                           static_cast<unsigned>(stats[1]), static_cast<unsigned>(stats[2]),
+                           static_cast<unsigned>(stats[3]), static_cast<unsigned>(stats[4]));
+}
+
+void SendDeletePlayerPacket(const std::string &name) {
+    std::string n = name.substr(0, 255);
+    TFCPacket p;
+    p << static_cast<short>(RQ_DeletePlayer);
+    p << static_cast<char>(n.size());
+    p << const_cast<char *>(n.c_str());
+    SendPacket(p);
+    g_deleteSentAt.store(SDL_GetTicks());
+    T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase, "[PHASE] -> RQ_DeletePlayer (15) « %s »", n.c_str());
+}
+
 void SendPostEnterWorldPackets() {
     g_waitingFromPreInGame.store(true);
     g_fromPreInGameResult.store(-1);
@@ -1954,6 +2031,12 @@ void ParseCharacterList(TFCPacket *msg) {
     g_authPhaseSentAt.store(0);
     g_authPhaseRetryCount.store(0);
     TryAutoEnterWorldAfterCreateList();
+    if (g_waitingDelete.load()) {
+        g_waitingDelete.store(false);
+        g_deleteSentAt.store(0);
+        g_deleteRetryCount.store(0);
+        g_pendingDeleteName.clear();
+    }
     T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase, "[PHASE] <- liste persos (%u)", count);
 }
 
@@ -1987,6 +2070,13 @@ bool ParsePutPlayerInGame(TFCPacket *msg) {
     char err = 0;
     msg->Get(&err);
     if (err != 0) {
+        if (err == 7 && !g_selectedPlayer.empty() && g_putPlayerRetryCount.load() < 4) {
+            const int n = g_putPlayerRetryCount.fetch_add(1) + 1;
+            g_putPlayerSentAt.store(SDL_GetTicks() - 7500);
+            T4CNetworkDebugLogKind(T4CMatrixLogKind::Warn,
+                                   "[PHASE] PutPlayerInGame busy (7) — retry %d/4 dans ~1 s", n);
+            return false;
+        }
         std::lock_guard<std::mutex> lock(g_errMutex);
         char buf[128];
         std::snprintf(buf, sizeof(buf), "PutPlayerInGame erreur %u", static_cast<unsigned>(err));
@@ -2103,6 +2193,18 @@ void HandleAuthVersionReply(TFCPacket *msg) {
                            "[PHASE] <- RQ_AuthenticateServerVersion (99) valid=%ld", valid);
     if (valid == 1) {
         g_authPhaseRetryCount.store(0);
+        if (g_pendingDeleteAfterAuth.exchange(false) && !g_pendingDeleteName.empty()) {
+            T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase,
+                                   "[PHASE] re-auth OK — renvoi RQ_DeletePlayer (15)");
+            SendDeletePlayerPacket(g_pendingDeleteName);
+            return;
+        }
+        if (g_pendingCreateAfterAuth.exchange(false) && !g_pendingCreateName.empty()) {
+            T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase,
+                                   "[PHASE] re-auth OK — renvoi RQ_CreatePlayer (25)");
+            SendCreatePlayerPacket(g_pendingCreateName, g_pendingCreateSex, g_pendingCreateStats);
+            return;
+        }
         g_pipelineStep.store(3);
         SendCharacterListRequest();
     } else {
@@ -2114,6 +2216,8 @@ void HandleAuthVersionReply(TFCPacket *msg) {
 
 void HandleCreatePlayerReply(TFCPacket *msg) {
     g_waitingCreate.store(false);
+    g_createSentAt.store(0);
+    g_createRetryCount.store(0);
     SkipOpcode(msg);
     char err = 0;
     msg->Get(&err);
@@ -2142,15 +2246,17 @@ void HandleRerollReply(TFCPacket *msg) {
 }
 
 void HandleDeletePlayerReply(TFCPacket *msg) {
-    g_waitingDelete.store(false);
     SkipOpcode(msg);
     char code = 0;
     msg->Get(&code);
     if (code != 0 && msg->isEnd()) {
         SetDeletePlayerError(static_cast<unsigned char>(code));
+        T4CNetworkDebugLogKind(T4CMatrixLogKind::Warn, "[PHASE] RQ_DeletePlayer (15) refuse code=%d",
+                               static_cast<int>(code));
         return;
     }
-    T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase, "[PHASE] RQ_DeletePlayer (15) OK");
+    T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase, "[PHASE] <- RQ_DeletePlayer (15) OK — refresh liste");
+    SendCharacterListRequest();
 }
 
 void ParsePeripheralObjectList(TFCPacket *msg, const bool replaceGroundList) {
@@ -2977,10 +3083,11 @@ void T4CLoginSessionHandlePacket(TFCPacket *msg) {
             if (!msg->isEnd()) {
                 msg->Get(&code);
             }
-            g_waitingFromPreInGame.store(false);
-            g_fromPreInGameResult.store(static_cast<int>(code));
             g_enterWorld46SentAt.store(0);
-            if (code == 0 || code == 1) {
+            if (code == 0) {
+                g_waitingFromPreInGame.store(false);
+                g_fromPreInGameResult.store(0);
+                g_enterWorld46RetryCount.store(0);
                 g_inGame.store(true);
                 g_pipelineStep.store(6);
                 {
@@ -2993,6 +3100,17 @@ void T4CLoginSessionHandlePacket(TFCPacket *msg) {
                 }
                 SendEnterWorldFollowUpPackets();
                 TryFlushPendingNearItems();
+            } else if ((code == 1 || code == 7) && g_enterWorld46RetryCount.load() < 8) {
+                const int n = g_enterWorld46RetryCount.fetch_add(1) + 1;
+                g_waitingFromPreInGame.store(true);
+                g_fromPreInGameResult.store(-1);
+                g_enterWorld46SentAt.store(SDL_GetTicks() - 2000);
+                T4CNetworkDebugLogKind(T4CMatrixLogKind::Warn,
+                                       "[PHASE] FromPreInGameToInGame (46) code=%d — retry %d/8",
+                                       static_cast<int>(code), n);
+            } else {
+                g_waitingFromPreInGame.store(false);
+                g_fromPreInGameResult.store(static_cast<int>(code));
             }
             T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase, "[PHASE] <- FromPreInGameToInGame (46) code=%d",
                                    static_cast<int>(code));
@@ -3274,6 +3392,54 @@ void T4CLoginSessionPollBackgroundTasks() {
         return;
     }
 
+    if (g_waitingCreate.load() && g_createSentAt.load() != 0 && !g_pendingCreateName.empty()) {
+        const Uint32 elapsed = SDL_GetTicks() - g_createSentAt.load();
+        if (elapsed >= 8000) {
+            const int retries = g_createRetryCount.fetch_add(1) + 1;
+            if (retries >= 4) {
+                SetCreatePlayerErrorMessage("Pas de reponse serveur (opcode 25 CreatePlayer).");
+                T4CNetworkDebugLogKind(T4CMatrixLogKind::Warn,
+                                       "[PHASE] timeout RQ_CreatePlayer (25) apres 4 essais");
+                return;
+            }
+            if (retries >= 2) {
+                T4CNetworkDebugLogKind(T4CMatrixLogKind::Auth,
+                                       "[AUTH] retry create — re-auth opcode 99 avant opcode 25");
+                g_pendingCreateAfterAuth.store(true);
+                SendAuthVersion();
+                return;
+            }
+            T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase, "[PHASE] retry RQ_CreatePlayer (25) (%d/4)",
+                                   retries + 1);
+            SendCreatePlayerPacket(g_pendingCreateName, g_pendingCreateSex, g_pendingCreateStats);
+        }
+        return;
+    }
+
+    if (g_waitingDelete.load() && g_deleteSentAt.load() != 0 && !g_pendingDeleteName.empty()) {
+        const Uint32 elapsed = SDL_GetTicks() - g_deleteSentAt.load();
+        if (elapsed >= 8000) {
+            const int retries = g_deleteRetryCount.fetch_add(1) + 1;
+            if (retries >= 4) {
+                SetDeletePlayerErrorMessage("Pas de reponse serveur (opcode 15 DeletePlayer).");
+                T4CNetworkDebugLogKind(T4CMatrixLogKind::Warn,
+                                       "[PHASE] timeout RQ_DeletePlayer (15) apres 4 essais");
+                return;
+            }
+            if (retries >= 2) {
+                T4CNetworkDebugLogKind(T4CMatrixLogKind::Auth,
+                                       "[AUTH] retry delete — re-auth opcode 99 avant opcode 15");
+                g_pendingDeleteAfterAuth.store(true);
+                SendAuthVersion();
+                return;
+            }
+            T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase, "[PHASE] retry RQ_DeletePlayer (15) (%d/4)",
+                                   retries + 1);
+            SendDeletePlayerPacket(g_pendingDeleteName);
+        }
+        return;
+    }
+
     if (g_waitingFromPreInGame.load() && g_fromPreInGameResult.load() < 0 && g_enterWorld46SentAt.load() != 0) {
         const Uint32 elapsed = SDL_GetTicks() - g_enterWorld46SentAt.load();
         if (elapsed >= 2500) {
@@ -3358,16 +3524,10 @@ bool T4CLoginSessionRequestCreatePlayer(const std::string &name, unsigned char s
         g_createError.clear();
     }
     g_pendingCreateName = name;
-    TFCPacket p;
-    p << static_cast<short>(RQ_CreatePlayer);
-    for (int i = 0; i < 5; ++i) {
-        p << static_cast<char>(stats[i]);
-    }
-    p << static_cast<char>(sex);
-    std::string n = name.substr(0, 255);
-    p << static_cast<char>(n.size());
-    p << const_cast<char *>(n.c_str());
-    SendPacket(p);
+    std::memcpy(g_pendingCreateStats, stats, 5);
+    g_pendingCreateSex = sex;
+    g_createRetryCount.store(0);
+    SendCreatePlayerPacket(name, sex, stats);
     g_waitingCreate.store(true);
     return true;
 }
@@ -3394,6 +3554,8 @@ void T4CLoginSessionClearCreatePlayerError() {
 void T4CLoginSessionPrepareForCreateScreen() {
     T4CLoginSessionClearCreatePlayerError();
     g_waitingCreate.store(false);
+    g_createSentAt.store(0);
+    g_createRetryCount.store(0);
     g_waitingReroll.store(false);
     g_rolledStatsPending.store(false);
     g_inCreateRerollPhase.store(false);
@@ -3458,14 +3620,10 @@ bool T4CLoginSessionRequestDeletePlayer(const std::string &playerName) {
         std::lock_guard<std::mutex> lock(g_errMutex);
         g_deleteError.clear();
     }
-    std::string n = playerName.substr(0, 255);
-    TFCPacket p;
-    p << static_cast<short>(RQ_DeletePlayer);
-    p << static_cast<char>(n.size());
-    p << const_cast<char *>(n.c_str());
-    SendPacket(p);
+    g_pendingDeleteName = playerName;
+    g_deleteRetryCount.store(0);
+    SendDeletePlayerPacket(playerName);
     g_waitingDelete.store(true);
-    SendCharacterListRequest();
     return true;
 }
 

@@ -7,10 +7,12 @@
 #pragma once
 #endif // _MSC_VER >= 1000
 
+#if defined(_WIN32)
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0600
 #endif
 #include <windows.h>
+#endif
 
 template <class ObjectType> class TemplateQueue;
 
