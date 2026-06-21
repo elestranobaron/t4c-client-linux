@@ -4,6 +4,31 @@
 #include "../pch.h"
 
 #include "V3_LifeDlg.h"
+
+// Guard anti-deadlock (cf. V3_StatsDlg / V2PalManager) : GetInstance() depuis le thread de rendu
+// pendant que le thread reseau construit l'instance.
+static V3_LifeDlg* g_pLifeDlgInstance = NULL;
+
+static bool  s_pendingDeadStatus     = false;
+static BYTE  s_pendingDeadStatusVal  = 0;
+static bool  s_pendingDeadInfo       = false;
+static WORD  s_pendingDeadCur        = 0;
+static WORD  s_pendingDeadMax        = 0;
+static BYTE  s_pendingDeadCanResurect = 0;
+
+static void ApplyPendingDeathUI(V3_LifeDlg *dlg)
+{
+   if (s_pendingDeadStatus)
+   {
+      s_pendingDeadStatus = false;
+      dlg->UpdateDeadStatus(s_pendingDeadStatusVal, true);
+   }
+   if (s_pendingDeadInfo)
+   {
+      s_pendingDeadInfo = false;
+      dlg->UpdateDeadInfo(s_pendingDeadCur, s_pendingDeadMax, s_pendingDeadCanResurect);
+   }
+}
 #include "RootBoxUI.h"
 #include "V3_StatDlg.h"
 #include "..\GUILocalString.h"  //g_GUILocalString[]
@@ -25,6 +50,8 @@ m_DeathBtnRestore( m_DeathBtnRestoreEvent,"Resurrect",g_DefColorH ),
 m_invBtnPV(EmptyEvent::GetInstance()),
 m_invBtnPM(EmptyEvent::GetInstance())
 {
+   g_pLifeDlgInstance = this;
+
    int i=0;
 
    m_dwDeadStatus = 0;
@@ -108,11 +135,27 @@ V3_LifeDlg *V3_LifeDlg::GetInstance( void )
 //  Returns the side menu instance.
 //////////////////////////////////////////////////////////////////////////////////////////
 {
+    if (g_pLifeDlgInstance)
+       return g_pLifeDlgInstance;
 
     static V3_LifeDlg instance;
     return &instance;
     
-} 
+}
+
+void V3_LifeDlg::QueueDeadStatus(BYTE chStatus)
+{
+   s_pendingDeadStatusVal = chStatus;
+   s_pendingDeadStatus    = true;
+}
+
+void V3_LifeDlg::QueueDeadInfo(WORD wTimeCurrent, WORD wTimeTotal, BYTE chCanResurect)
+{
+   s_pendingDeadCur         = wTimeCurrent;
+   s_pendingDeadMax         = wTimeTotal;
+   s_pendingDeadCanResurect = chCanResurect;
+   s_pendingDeadInfo        = true;
+}
 
 //////////////////////////////////////////////////////////////////////////////////////////
 //  Callback displaying the inventory macro.
@@ -162,6 +205,8 @@ void V3_LifeDlg::Draw(V2SPRITEFX *vsfFX)
 {
    if(!IsShown())
       return;
+
+   ApplyPendingDeathUI(this);
 
    int iOffX = m_iXPos;
    int iOffY = m_iYPos;

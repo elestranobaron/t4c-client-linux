@@ -20,6 +20,10 @@ public:
 
     static V3_LifeDlg *GetInstance();
     static unsigned int Display( void *null );
+
+    // File d'attente thread-safe : les handlers reseau (mort) ne touchent pas l'UI directement.
+    static void QueueDeadStatus(BYTE chStatus);
+    static void QueueDeadInfo(WORD wTimeCurrent, WORD wTimeTotal, BYTE chCanResurect);
    
     virtual void Draw( V2SPRITEFX *vsfFX );
     void Hide();

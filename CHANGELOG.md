@@ -7,6 +7,22 @@ Familles : **Décision**, **Assets**, **Build**, **Réseau**, **Rendu**, **Serve
 
 ---
 
+## 2026-06-21 18:00:00 — FIX client Windows : crash / freeze a la mort du personnage
+
+**Famille : Réseau / Rendu**
+
+Symptôme : après mort en combat, le client Windows se fige ou plante ; dernière trace souvent `UDP recu nbuf=640` sans `DEDUP OK` suivant.
+
+Cause : rafale serveur mort (statut mort, inventaire, megapack) traitée sur le **thread réseau** avec appels UI (`V3_LifeDlg`, `UpdateInventory`) qui entrent en conflit avec le thread de rendu (`RootBoxUI::threadLock`, guard singleton VS2022).
+
+Correctifs :
+- `V3_LifeDlg` / `V3_InvDlg` : guard `g_p*Instance` (pattern `V3_StatsDlg`) + pré-construction `V3_LifeDlg` à l'opcode 13.
+- Mort : `QueueDeadStatus` / `QueueDeadInfo` depuis le thread réseau, application dans `V3_LifeDlg::Draw`.
+- `ViewBackpack2` : données sac mises à jour côté réseau, `UpdateInventory` différé via `g_pendingInventoryRefresh` dans `RootBoxUI::Draw`.
+- `NMPacketManager::AnalyzePacket` : borne megapack (évite dépassement buffer sur gros paquets mort).
+
+---
+
 ## 2026-06-21 16:30:00 — FIX client Windows : delete/create auth menu + opcode 46/13
 
 **Famille : Réseau / Client Windows**

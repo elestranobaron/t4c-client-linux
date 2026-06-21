@@ -20,9 +20,16 @@
 #include "V3_ItemInfoDlg.h"
 #include "V3_DisplayHelpDlg.h"
 #include "V3_AHVendreDlg.h"
+#include "V3_InvDlg.h"
 
+#include "..\TFCPlayer.h"
 #include "..\SaveGame.h"
+#include "..\App.h"
+
 extern CSaveGame g_SaveGame;
+extern bool g_UiInit;
+extern bool g_pendingInventoryRefresh;
+extern TFCPlayer Player;
 extern DWORD TargetID;
 extern DWORD SelectedID;
 
@@ -843,6 +850,13 @@ void RootBoxUI::Draw( V2SPRITEFX *vsfFX )
    {
       // Draw it
       foregroundChild->Draw( NULL );
+   }
+
+   // Rafraichissement inventaire differe (ViewBackpack2 depuis le thread reseau, ex. mort).
+   if (g_UiInit && g_pendingInventoryRefresh)
+   {
+      g_pendingInventoryRefresh = false;
+      V3_InvDlg::GetInstance()->UpdateInventory( &Player.tlBackpack );
    }
 }
 

@@ -974,10 +974,15 @@ void NMPacketManager::AnalyzePacket(UDPPacket *pPacket)
             //AddToLogFile(TRUE,"-> Analyse MEGAPACK: ID = %d (nbr sub packet = %d)\n",pPacket->pHeader->ushID,ushNbr);
             //on a un mega pack, on dois traiter tous ses packet...
             unsigned char *pCurDataPos = pPacket->puchData+4;
+            unsigned char *pDataEnd    = pPacket->puchData + pPacket->ulDataLength;
             unsigned long ulDataLen    = 0;
             for(int i=0;i<ushNbr;i++)
             {
+               if (pCurDataPos + 2 > pDataEnd)
+                  break;
                ulDataLen = Reverse(*(short *)&pCurDataPos[0]); pCurDataPos+=2;
+               if (ulDataLen == 0 || pCurDataPos + ulDataLen > pDataEnd)
+                  break;
 
                if(m_pfProcessCallback)
                   m_pfProcessCallback( m_pParent,pPacket->sockAddr, pCurDataPos, ulDataLen,0);

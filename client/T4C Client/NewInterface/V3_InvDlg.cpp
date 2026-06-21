@@ -15,6 +15,9 @@
 #include "V3_GroupeDlg.h"
 #include "V3_MacroDlg.h"
 #include "V3_InvDlg.h"
+
+// Guard anti-deadlock (cf. V3_StatsDlg) : construction concurrente thread reseau / rendu.
+static V3_InvDlg* g_pInvDlgInstance = NULL;
 #include "V3_OptionsDlg.h"
 #include "V3_ProfessionDlg.h"
 #include "V3_SpellDlg.h"
@@ -253,6 +256,8 @@ TradeButton( tradeButtonEvent ),
 junkButton( junkButtonEvent ),
 dropButton( dropButtonEvent )
 {
+   g_pInvDlgInstance = this;
+
    int i=0;
    InitSound();
 
@@ -480,6 +485,8 @@ V3_InvDlg *V3_InvDlg::GetInstance( void )
 //  Returns the side menu instance.
 //////////////////////////////////////////////////////////////////////////////////////////
 {
+    if (g_pInvDlgInstance)
+       return g_pInvDlgInstance;
 
     static V3_InvDlg instance;
     return &instance;
@@ -1172,7 +1179,7 @@ void V3_InvDlg::InventoryGridEvent::LeftDblClicked()
    }
    else 
    {
-	   if (!strcmp( (const char *)item->bagItem->chIName, "Déblocage 7ème renaissance" ))
+	   if (!strcmp( (const char *)item->bagItem->chIName, "D?blocage 7?me renaissance" ))
 	   {
 		   if(g_Var.dw1stAprilCnt == 0)
 		   {
@@ -1224,7 +1231,7 @@ void V3_InvDlg::InventoryGridEvent::LeftDblClicked()
       }
    }
 
-   if (!strcmp( (const char *)item->bagItem->chIName, "Déblocage 7ème renaissance" ))
+   if (!strcmp( (const char *)item->bagItem->chIName, "D?blocage 7?me renaissance" ))
    {
 	  V3_InvDlg::GetInstance()->Hide();
    }

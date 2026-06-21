@@ -67,6 +67,7 @@ bool          g_bDrawThreadPaused = false;
 UINT          g_uiReloadForceTeleport = 0;
 UINT          g_uiReloadForce = 0;
 bool          g_UiInit = false;
+bool          g_pendingInventoryRefresh = false;
 bool          g_boWaitForShutdown = true;
 
 unsigned char *g_ListData  = NULL;

@@ -105,6 +105,7 @@ HANDLE hMouseActionThread = NULL;
 UINT iMouseActionThreadID = 0;
 
 extern bool g_UiInit;
+extern bool g_pendingInventoryRefresh;
 extern int SlowMeDown;
 bool Code13 = false;
 bool EnterGame = false;
@@ -3585,8 +3586,9 @@ void HandlePacket(TFCPacket *Msg)
 
 		Player.tlBackpack.Unlock("HandlePacket 2");
 
-		// Update the new interface inventory.
-		V3_InvDlg::GetInstance()->UpdateInventory( &Player.tlBackpack );
+		// Reporter la mise a jour UI sur le thread de rendu (evite deadlock threadLock a la mort).
+		if (g_UiInit)
+		   g_pendingInventoryRefresh = true;
 
 						  } break;
 
@@ -5714,7 +5716,7 @@ void HandlePacket(TFCPacket *Msg)
 
          GET_BYTE(chStatus);
 
-		   V3_LifeDlg::GetInstance()->UpdateDeadStatus(chStatus,true);
+		   V3_LifeDlg::QueueDeadStatus(chStatus);
       }
     break;
     case RQ_NM_DeathProgress: 
@@ -5730,7 +5732,7 @@ void HandlePacket(TFCPacket *Msg)
 		   GET_WORD(wTimeTotal);
          GET_BYTE(chCanResurect);
 
-		   V3_LifeDlg::GetInstance()->UpdateDeadInfo(wTimeCurrent,wTimeTotal,chCanResurect);
+		   V3_LifeDlg::QueueDeadInfo(wTimeCurrent,wTimeTotal,chCanResurect);
 	   }; 
     break;
     case RQ_NM_XPScrollProgress:
@@ -6341,6 +6343,7 @@ void HandlePacket(TFCPacket *Msg)
            EnterGameTrace("13: dlg Groupe");         V3_GroupeDlg::GetInstance();
            EnterGameTrace("13: dlg Profession");     V3_ProfessionDlg::GetInstance();
            EnterGameTrace("13: dlg Inv");            V3_InvDlg::GetInstance();
+           EnterGameTrace("13: dlg Life");           V3_LifeDlg::GetInstance();
            EnterGameTrace("13: SpellList");          V3_SpellDlg::GetInstance()->RequestSpellList();
            EnterGameTrace("13: StatsUpdate");        V3_StatsDlg::GetInstance()->UpdateCharacterSheet("OK-TFCInGame");
            EnterGameTrace("13: dialogs+stats OK");
