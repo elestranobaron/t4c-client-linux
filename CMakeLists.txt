@@ -63,6 +63,7 @@ set(T4C_APP_SOURCES
     src/assets/map/T4CMapObjectSprites.cpp
     src/game/T4CPuppet.cpp
     src/game/T4CGroundObjectSprites.cpp
+    src/game/T4CInvItemSprites.cpp
     src/game/T4CMovementBaseline.cpp
     src/game/T4CUnitSpriteNames.cpp
     src/game/T4CGameHud.cpp
