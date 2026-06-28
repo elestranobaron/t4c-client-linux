@@ -4,8 +4,14 @@
 
 /** Constantes baseline — voir CHANGELOG « BASELINE IMMUABLE ». */
 constexpr int kT4CPlayerScrollSteps = 8;
-/** FacesStM puppet / Icon3D — cycle marche Windows (StMov000-a … StMov000-i). */
+/** Cycle marche joueur / classes PC (warrio000-a … warrio000-i). */
 constexpr int kT4CWalkAnimFrames = 9;
+/** Cycle marche creature PNJ (Rat=6, Bat=8 — 6 couvre la majorite sans frame fantome). */
+constexpr int kT4CNpcWalkAnimFrames = 6;
+/** Cycle marche puppet joueur (Icon3D LoadSprite3D faces=13, View045-a … View045-m). */
+constexpr int kT4CPuppetWalkAnimFrames = 13;
+/** Intervalle tick marche PNJ distants (VisualObjectList nbSprite4Move, ~90 ms). */
+constexpr int kT4CWalkAnimTickMs = 90;
 constexpr std::uint16_t kT4CEventObjectMovedOpcode = 1;
 
 /** Position serveur (tuile) + centre visuel carte (float). */
@@ -47,5 +53,17 @@ void T4CPlayerViewApplyServerMove(T4CPlayerViewState *state, unsigned int newX, 
  */
 bool T4CWalkAnimShouldResetFrame(bool wasMoving, int oldDirection, int newDirection);
 
-/** Frame suivante du cycle StMov (0 … kT4CWalkAnimFrames-1). */
-int T4CWalkAnimNextFrame(int frame);
+constexpr int kT4CIdleAnimFrames = 4;
+constexpr int kT4CIdleAnimTickMs = 150;
+
+/** Frame suivante cycle idle StMov (0 … kT4CIdleAnimFrames-1). */
+int T4CWalkAnimNextIdleFrame(int frame);
+
+/** Frame suivante cycle marche creature PNJ (0 … kT4CNpcWalkAnimFrames-1). */
+int T4CWalkAnimNextNpcFrame(int frame);
+
+/**
+ * Frame suivante puppet joueur — VisualObjectList.cpp Type==0, Faces=13 :
+ * SpriteNumber 1..13 puis wrap (equiv. frame 0..12 modulo 13).
+ */
+int T4CWalkAnimNextPuppetFrame(int frame);

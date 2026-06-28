@@ -175,3 +175,24 @@ int T4CWalkAnimNextFrame(const int frame) {
     }
     return (frame + 1) % kT4CWalkAnimFrames;
 }
+
+int T4CWalkAnimNextNpcFrame(const int frame) {
+    if (kT4CNpcWalkAnimFrames <= 0) {
+        return 0;
+    }
+    return (frame + 1) % kT4CNpcWalkAnimFrames;
+}
+
+int T4CWalkAnimNextIdleFrame(const int frame) {
+    if (kT4CIdleAnimFrames <= 0) {
+        return 0;
+    }
+    return (frame + 1) % kT4CIdleAnimFrames;
+}
+
+int T4CWalkAnimNextPuppetFrame(const int frame) {
+    if (kT4CPuppetWalkAnimFrames <= 0) {
+        return 0;
+    }
+    return (frame + 1) % kT4CPuppetWalkAnimFrames;
+}

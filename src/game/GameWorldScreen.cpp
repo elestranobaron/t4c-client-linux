@@ -18,6 +18,7 @@
 #include <cstring>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace {
@@ -78,27 +79,84 @@ float WorldToScreenY(unsigned int worldY, unsigned int playerY) {
                           static_cast<float>(GameWorldScreen::kTileSize);
 }
 
-void appendUnitSpritePreload(const char *base, std::vector<std::string> *queue) {
-    T4CAppendUnitSpritePreload(base, queue);
-}
-
 bool tryDrawNpcBase(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, const char *base, const float screenX,
-                    const float screenY, const int direction, const int animFrame, const bool attacking) {
+                    const float screenY, const int direction, const int animFrame, const bool attacking,
+                    const bool idleStanding) {
     if (!base || base[0] == '\0' || !renderer) {
         return false;
     }
     const T4CUnitSpriteView view = T4CUnitSpriteViewFromDirection(direction);
+    const int maxWalkFrame = kT4CNpcWalkAnimFrames - 1;
     if (attacking) {
         const std::string attackFrame = T4CUnitAttackSpriteFrameName(base, view, animFrame);
         if (!attackFrame.empty() && atlas.TryDrawSpriteByName(renderer, attackFrame, screenX, screenY, view.mirror)) {
             return true;
         }
     }
-    const std::string frame = T4CUnitSpriteFrameName(base, view, animFrame);
+    /* StMov absent du port V2 (V2DataI.did) : a l'arret, frame 0 du cycle marche (Windows pose statique). */
+    const int frameIndex = idleStanding ? 0 : animFrame;
+    const std::string frame = T4CUnitSpriteFrameName(base, view, frameIndex, maxWalkFrame);
     if (!frame.empty() && atlas.TryDrawSpriteByName(renderer, frame, screenX, screenY, view.mirror)) {
         return true;
     }
-    return atlas.TryDrawSpriteByName(renderer, base, screenX, screenY);
+    if (!idleStanding && frameIndex != 0) {
+        const std::string frame0 = T4CUnitSpriteFrameName(base, view, 0, maxWalkFrame);
+        if (!frame0.empty() && atlas.TryDrawSpriteByName(renderer, frame0, screenX, screenY, view.mirror)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool tryDrawNpcOutline(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, const char *base, const float screenX,
+                       const float screenY, const int direction, const int animFrame, const bool attacking,
+                       const bool idleStanding) {
+    if (!base || base[0] == '\0' || !renderer) {
+        return false;
+    }
+    const T4CUnitSpriteView view = T4CUnitSpriteViewFromDirection(direction);
+    const int maxWalkFrame = kT4CNpcWalkAnimFrames - 1;
+    if (attacking) {
+        const std::string attackFrame = T4CUnitAttackSpriteFrameName(base, view, animFrame);
+        if (!attackFrame.empty() &&
+            atlas.TryDrawSpriteOutline(renderer, attackFrame, screenX, screenY, 255, 255, 255, view.mirror)) {
+            return true;
+        }
+    }
+    const int frameIndex = idleStanding ? 0 : animFrame;
+    const std::string frame = T4CUnitSpriteFrameName(base, view, frameIndex, maxWalkFrame);
+    if (!frame.empty() &&
+        atlas.TryDrawSpriteOutline(renderer, frame, screenX, screenY, 255, 255, 255, view.mirror)) {
+        return true;
+    }
+    return false;
+}
+
+bool tryDrawCorpse(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, const char *base, const float screenX,
+                   const float screenY, const int corpseFrame) {
+    if (!base || base[0] == '\0' || !renderer) {
+        return false;
+    }
+    const std::string frame = T4CUnitCorpseSpriteFrameName(base, corpseFrame);
+    if (!frame.empty() && atlas.TryDrawSpriteByName(renderer, frame, screenX, screenY)) {
+        return true;
+    }
+    /* Pas de fallback sur le sprite vivant : un cadavre sans sprite dedie doit
+       disparaitre, sinon le monstre "mort" reste affiche vivant (clone fige). */
+    return false;
+}
+
+void LogUnitDrawFailOnce(const std::int32_t unitId, const std::uint16_t appearance, const char *reason) {
+    static std::unordered_set<std::uint32_t> logged;
+    const std::uint32_t key =
+        (static_cast<std::uint32_t>(unitId) << 16) | static_cast<std::uint32_t>(appearance);
+    if (!logged.insert(key).second) {
+        return;
+    }
+    const char *sprite = T4CRemoteUnitSpriteName(unitId, appearance);
+    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "[GameWorld] drawUnitSprite KO id=%d appearance=%u sprite=%s (%s)", unitId,
+                static_cast<unsigned>(appearance), sprite != nullptr ? sprite : "?", reason);
 }
 
 }  // namespace
@@ -133,6 +191,17 @@ static const char *kHoldMoveCursorSprite(int direction) {
         return nullptr;
     }
     return kSprites[direction - 1];
+}
+
+bool tryDrawAnimatedGloveCursor(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, const float x,
+                                const float y) {
+    const int frame = static_cast<int>((SDL_GetTicks() / 90u) % 12u);
+    char gloveName[16];
+    std::snprintf(gloveName, sizeof(gloveName), "glove%04d", frame);
+    if (atlas.TryDrawSpriteByName(renderer, gloveName, x, y)) {
+        return true;
+    }
+    return atlas.TryDrawSpriteByName(renderer, "glove0000", x, y);
 }
 
 int GameWorldScreen::moveCursorDirectionFromScreen(const float screenX, const float screenY) {
@@ -199,6 +268,7 @@ void GameWorldScreen::updateHoldMoveCursor(const float screenX, const float scre
 void GameWorldScreen::beginHoldMove(const float screenX, const float screenY) {
     leftMouseHeld_ = true;
     cancelPendingAttack();
+    cancelPendingGroundAction();
     updateHoldMoveCursor(screenX, screenY);
 }
 
@@ -249,12 +319,19 @@ int GameWorldScreen::isoViewRadius() const {
     return std::min(kLogicalWidth / kIsoTileW, kLogicalHeight / kIsoTileH) + 8;
 }
 
-void GameWorldScreen::finishEnterWorld() {
+void GameWorldScreen::finishAssetLoad() {
     loading_ = false;
     preloadQueue_.clear();
     preloadIndex_ = 0;
     loadProgress_ = 1.f;
+}
+
+void GameWorldScreen::completeSessionEnter() {
+    if (ready_) {
+        return;
+    }
     ready_ = true;
+    canMove_ = true;
 
     if (!T4CLoginSessionRequestNearItems()) {
         lastError_ = "T4CLoginSessionRequestNearItems a echoue";
@@ -266,9 +343,15 @@ void GameWorldScreen::finishEnterWorld() {
     T4CLoginSessionRequestSpellList();
     T4CLoginSessionUpdateActivePlayerPosition(playerX_, playerY_);
 
-    /* Zones nommees : charge la carte de zones du monde (bandeau « Vous entrez dans... »). */
     zoneMap_.LoadWorld(world_);
     lastZoneId_ = zoneMap_.IsLoaded() ? zoneMap_.ZoneIdAt(playerX_, playerY_) : -1;
+}
+
+void GameWorldScreen::tryCompleteSessionEnter() {
+    if (loading_ || ready_ || !T4CLoginSessionIsWorldSessionReady()) {
+        return;
+    }
+    completeSessionEnter();
 }
 
 void GameWorldScreen::updateZoneBanner() {
@@ -304,7 +387,7 @@ bool GameWorldScreen::BeginLoad(SDL_Renderer *renderer, SDL_Window *window, cons
     playerY_ = spawnY;
     snapPlayerViewToServer();
     world_ = world;
-    canMove_ = true;
+    canMove_ = false;
     moveCooldownUntil_ = 0;
     returnToLogin_ = false;
     quitApp_ = false;
@@ -339,29 +422,42 @@ bool GameWorldScreen::BeginLoad(SDL_Renderer *renderer, SDL_Window *window, cons
             spritesLoaded_ = true;
             T4CV2SpriteAtlas::CollectViewportSpriteNames(v2Map_, spawnX, spawnY, isoViewRadius(),
                                                          preloadQueue_);
-            for (int cls = 0; cls < 4; ++cls) {
-                T4CActivePlayer probe{};
-                probe.classIndex = static_cast<std::uint8_t>(cls);
-                probe.valid = true;
-                const char *base = T4CPlayerSpriteNpcName(probe);
-                appendUnitSpritePreload(base, &preloadQueue_);
+            T4CActivePlayer active{};
+            T4CLoginSessionGetActivePlayer(&active);
+            T4CPuppetDress dress{};
+            dress.body = 285;
+            dress.legs = 284;
+            dress.known = true;
+            if (active.valid && active.puppetKnown) {
+                dress.body = active.puppetBody;
+                dress.feet = active.puppetFeet;
+                dress.gloves = active.puppetGloves;
+                dress.helm = active.puppetHelm;
+                dress.legs = active.puppetLegs;
+                dress.weaponR = active.puppetWeaponR;
+                dress.weaponL = active.puppetWeaponL;
+                dress.cape = active.puppetCape;
+                dress.known = true;
             }
-            T4CPuppetDress defaultDress{};
-            defaultDress.body = 285;
-            defaultDress.legs = 284;
-            defaultDress.known = true;
-            T4CPuppetAppendDressPreload(defaultDress, false, &preloadQueue_);
-            std::vector<std::string> creatureBases;
-            T4CCollectCreaturePreloadBases(&creatureBases);
-            for (const std::string &base : creatureBases) {
-                appendUnitSpritePreload(base.c_str(), &preloadQueue_);
+            T4CPuppetAppendDressPreload(dress, active.valid && active.female, &preloadQueue_);
+            if (active.valid) {
+                if (const char *base = T4CPlayerSpriteNpcName(active); base != nullptr) {
+                    T4CAppendUnitSpritePreload(base, &preloadQueue_);
+                }
             }
             gameHud_.preloadSprites(&spriteAtlas_);
             preloadQueue_.push_back("V3_LifeBackF");
             preloadQueue_.push_back("V3_PVBar");
             preloadQueue_.push_back("V3_PMBar");
             preloadQueue_.push_back("StaticAttackCursor");
-            preloadQueue_.push_back("glove0000");
+            for (int f = 0; f <= 11; ++f) {
+                char gloveName[16];
+                char gloveMask[20];
+                std::snprintf(gloveName, sizeof(gloveName), "glove%04d", f);
+                std::snprintf(gloveMask, sizeof(gloveMask), "glove%04dMask", f);
+                preloadQueue_.push_back(gloveName);
+                preloadQueue_.push_back(gloveMask);
+            }
             preloadQueue_.push_back("V3_TalkCursor");
             for (int f = 0; f <= 22; f += 2) {
                 char swordName[16];
@@ -377,7 +473,10 @@ bool GameWorldScreen::BeginLoad(SDL_Renderer *renderer, SDL_Window *window, cons
             preloadQueue_.push_back("V3_West Cursor");
             preloadQueue_.push_back("V3_North-West Cursor");
             spriteAtlas_.PreloadBanksForNames(preloadQueue_);
-            SDL_Log("[GameWorld] preload viewport : %zu sprites uniques", preloadQueue_.size());
+            deferredPreloadQueue_.clear();
+            deferredPreloadIndex_ = 0;
+            SDL_Log("[GameWorld] preload bloquant : %zu sprites (creatures a la demande au spawn)",
+                    preloadQueue_.size());
         } else {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "[GameWorld] sprites V2 : %s",
                         spriteAtlas_.GetLastError().c_str());
@@ -399,32 +498,42 @@ bool GameWorldScreen::BeginLoad(SDL_Renderer *renderer, SDL_Window *window, cons
     }
 
     if (!spritesLoaded_ || preloadQueue_.empty()) {
-        finishEnterWorld();
+        finishAssetLoad();
     }
     return true;
 }
 
-bool GameWorldScreen::PollLoad(const int batchSize) {
+bool GameWorldScreen::PollLoadForMs(const int maxMs) {
     if (!loading_ || ready_) {
         return ready_;
     }
 
     if (spritesLoaded_ && preloadIndex_ < static_cast<int>(preloadQueue_.size())) {
         const int processed =
-            spriteAtlas_.PreloadSprites(preloadQueue_, preloadIndex_, std::max(1, batchSize));
+            spriteAtlas_.PreloadSpritesForMs(preloadQueue_, preloadIndex_, std::max(1, maxMs));
         preloadIndex_ += processed;
-        if (preloadQueue_.empty()) {
-            loadProgress_ = 1.f;
-        } else {
+        if (!preloadQueue_.empty()) {
             loadProgress_ = static_cast<float>(preloadIndex_) /
                             static_cast<float>(preloadQueue_.size());
         }
     }
 
     if (preloadIndex_ >= static_cast<int>(preloadQueue_.size())) {
-        finishEnterWorld();
+        finishAssetLoad();
     }
+    tryCompleteSessionEnter();
     return ready_;
+}
+
+void GameWorldScreen::pollDeferredSpritePreload(const int maxMs) {
+    if (!ready_ || !spritesLoaded_ || deferredPreloadQueue_.empty()) {
+        return;
+    }
+    if (deferredPreloadIndex_ >= static_cast<int>(deferredPreloadQueue_.size())) {
+        return;
+    }
+    deferredPreloadIndex_ +=
+        spriteAtlas_.PreloadSpritesForMs(deferredPreloadQueue_, deferredPreloadIndex_, maxMs);
 }
 
 void GameWorldScreen::RenderLoading(SDL_Renderer *renderer, LauncherChrome *chrome) const {
@@ -473,7 +582,7 @@ bool GameWorldScreen::Init(SDL_Renderer *renderer, SDL_Window *window, const uns
         return false;
     }
     while (loading_ && !ready_) {
-        PollLoad(512);
+        PollLoadForMs(32);
     }
     return ready_;
 }
@@ -488,7 +597,7 @@ void GameWorldScreen::Shutdown() {
     chatLog_.clear();
     overheadSpeech_.clear();
     selectedBagIndex_ = -1;
-    gameHud_.shutdown();
+    cancelInventoryDrag();
     if (nightHaloTexture_) {
         SDL_DestroyTexture(nightHaloTexture_);
         nightHaloTexture_ = nullptr;
@@ -510,6 +619,8 @@ void GameWorldScreen::Shutdown() {
     loading_ = false;
     preloadQueue_.clear();
     preloadIndex_ = 0;
+    deferredPreloadQueue_.clear();
+    deferredPreloadIndex_ = 0;
     loadProgress_ = 0.f;
     renderer_ = nullptr;
     window_ = nullptr;
@@ -683,7 +794,19 @@ void GameWorldScreen::syncGroundObjectsFromNetwork() {
                 T4CGameMusic::PlaySfx("Close Wooden Door");
             }
         }
+        const bool isNew = previous.find(marker.unitId) == previous.end();
         groundObjects_[marker.unitId] = marker;
+        if (isNew && spritesLoaded_) {
+            if (const char *sp = T4CGroundObjectSpriteName(marker.appearance); sp != nullptr) {
+                const std::string name(sp);
+                if (std::find(deferredPreloadQueue_.begin(), deferredPreloadQueue_.end(), name) ==
+                    deferredPreloadQueue_.end()) {
+                    deferredPreloadQueue_.push_back(name);
+                }
+                spriteAtlas_.PreloadBanksForNames(deferredPreloadQueue_);
+                spriteAtlas_.PreloadSprites({name}, 0, 1);
+            }
+        }
     }
 }
 
@@ -750,10 +873,52 @@ void GameWorldScreen::applyLocalMoveDelta(const int dx, const int dy) {
     T4CLoginSessionUpdateActivePlayerPosition(playerX_, playerY_);
 }
 
+void GameWorldScreen::preloadUnitSpritesForAppearance(const std::uint16_t appearance) {
+    if (!spritesLoaded_ || appearance == 0 || T4CIsPuppetAppearance(appearance)) {
+        return;
+    }
+    const char *base = T4CSpriteNameFromAppearance(appearance);
+    if (base == nullptr || base[0] == '\0') {
+        return;
+    }
+    std::vector<std::string> names;
+    T4CAppendUnitSpritePreloadMinimal(base, &names);
+    if (names.empty()) {
+        return;
+    }
+    spriteAtlas_.PreloadBanksForNames(names);
+    spriteAtlas_.PreloadSpritesForMs(names, 0, 16);
+}
+
 void GameWorldScreen::syncRemoteUnitsFromNetwork() {
     std::vector<T4CRemoteUnitEvent> events;
     T4CLoginSessionDrainRemoteUnitEvents(&events);
+    const auto beginDeath = [](RemoteUnitVisual &unit, const std::uint16_t corpseApp, const Uint32 now) {
+        if (unit.dying) {
+            return;
+        }
+        unit.liveAppearance = unit.appearance != 0 ? unit.appearance : corpseApp;
+        unit.corpseAppearance = corpseApp;
+        unit.dying = true;
+        /* Windows ChangeType : Killed=true, KillTimer, Type reste VIVANT ~500 ms puis KillType. */
+        unit.showCorpse = false;
+        unit.displayX = static_cast<float>(unit.serverX);
+        unit.displayY = static_cast<float>(unit.serverY);
+        unit.dieStartedAt = now;
+        unit.corpseFrame = 0;
+        unit.corpseAnimTick = now;
+        unit.moving = false;
+        unit.attacking = false;
+        unit.attackAnimFrame = 0;
+        unit.animFrame = 0;
+        unit.idleAnimFrame = 0;
+        unit.hpPercent = 0;
+    };
     for (const T4CRemoteUnitEvent &ev : events) {
+        if (ev.kind != T4CRemoteUnitEventKind::Remove && ev.kind != T4CRemoteUnitEventKind::Die &&
+            T4CLoginSessionIsRemoteUnitDying(ev.unitId)) {
+            continue;
+        }
         if (T4CLoginSessionShouldSkipRemoteUnit(ev.appearance, ev.unitId, ev.x, ev.y)) {
             remoteUnits_.erase(ev.unitId);
             continue;
@@ -762,40 +927,113 @@ void GameWorldScreen::syncRemoteUnitsFromNetwork() {
         switch (ev.kind) {
             case T4CRemoteUnitEventKind::Remove:
                 remoteUnits_.erase(ev.unitId);
+                T4CLoginSessionFinalizeRemoteUnitDeath(ev.unitId);
+                if (selectedUnitId_ == ev.unitId) {
+                    selectedUnitId_ = 0;
+                }
+                if (hoveredUnitId_ == ev.unitId) {
+                    hoveredUnitId_ = 0;
+                }
                 break;
+            case T4CRemoteUnitEventKind::Die: {
+                const auto it = remoteUnits_.find(ev.unitId);
+                if (it == remoteUnits_.end()) {
+                    break;
+                }
+                RemoteUnitVisual &unit = it->second;
+                const Uint32 now = SDL_GetTicks();
+                beginDeath(unit, ev.appearance, now);
+                /* Tuer les cadavres GetNearItems fantomes au meme tile (clone Bat 25002). */
+                const unsigned deadX = unit.serverX;
+                const unsigned deadY = unit.serverY;
+                std::vector<std::int32_t> duplicateCorpses;
+                for (const auto &other : remoteUnits_) {
+                    if (other.first == ev.unitId) {
+                        continue;
+                    }
+                    if (other.second.serverX == deadX && other.second.serverY == deadY &&
+                        T4CIsCreatureCorpseAppearance(other.second.appearance)) {
+                        duplicateCorpses.push_back(other.first);
+                    }
+                }
+                for (const std::int32_t dupeId : duplicateCorpses) {
+                    remoteUnits_.erase(dupeId);
+                    T4CLoginSessionFinalizeRemoteUnitDeath(dupeId);
+                }
+                if (selectedUnitId_ == ev.unitId) {
+                    selectedUnitId_ = 0;
+                }
+                if (hoveredUnitId_ == ev.unitId) {
+                    hoveredUnitId_ = 0;
+                }
+                break;
+            }
             case T4CRemoteUnitEventKind::Spawn:
             case T4CRemoteUnitEventKind::Move:
             case T4CRemoteUnitEventKind::Update:
             case T4CRemoteUnitEventKind::Attack: {
+                const auto existing = remoteUnits_.find(ev.unitId);
+                if (existing != remoteUnits_.end() && existing->second.dying) {
+                    break;
+                }
                 RemoteUnitVisual &unit = remoteUnits_[ev.unitId];
                 const bool firstSpawn = !unit.initialized;
-                const int dx = static_cast<int>(ev.x) - static_cast<int>(unit.serverX);
-                const int dy = static_cast<int>(ev.y) - static_cast<int>(unit.serverY);
-                if (unit.initialized && (dx != 0 || dy != 0)) {
-                    unit.direction = T4CDirectionFromServerMoveConfirm(dx, dy, ev.moveOpcode);
-                } else if (ev.moveOpcode >= 1 && ev.moveOpcode <= 8) {
-                    unit.direction = T4CDirectionFromMoveOpcode(ev.moveOpcode);
-                }
-                if (firstSpawn) {
-                    unit.displayX = static_cast<float>(ev.x);
-                    unit.displayY = static_cast<float>(ev.y);
+                const bool hasPosition =
+                    ev.snapDisplay || ev.kind == T4CRemoteUnitEventKind::Spawn ||
+                    ev.kind == T4CRemoteUnitEventKind::Move || ev.kind == T4CRemoteUnitEventKind::Attack;
+                const int dx = hasPosition ? static_cast<int>(ev.x) - static_cast<int>(unit.serverX) : 0;
+                const int dy = hasPosition ? static_cast<int>(ev.y) - static_cast<int>(unit.serverY) : 0;
+                if (hasPosition) {
+                    if (unit.initialized && (dx != 0 || dy != 0)) {
+                        unit.direction = T4CDirectionFromServerMoveConfirm(dx, dy, ev.moveOpcode);
+                    } else if (ev.moveOpcode >= 1 && ev.moveOpcode <= 8) {
+                        unit.direction = T4CDirectionFromMoveOpcode(ev.moveOpcode);
+                    }
+                    if (firstSpawn) {
+                        unit.displayX = static_cast<float>(ev.x);
+                        unit.displayY = static_cast<float>(ev.y);
+                        unit.initialized = true;
+                        if (ev.appearance != 0) {
+                            preloadUnitSpritesForAppearance(ev.appearance);
+                        }
+                    } else if (ev.kind == T4CRemoteUnitEventKind::Move && !ev.snapDisplay &&
+                               std::abs(dx) <= 3 && std::abs(dy) <= 3 && (dx != 0 || dy != 0)) {
+                        /* Move UDP tuile par tuile : retard visuel borne a 1 tuile (Windows MovX/SpeedX). */
+                        const float ddx = static_cast<float>(ev.x) - unit.displayX;
+                        const float ddy = static_cast<float>(ev.y) - unit.displayY;
+                        const float lag = std::max(std::abs(ddx), std::abs(ddy));
+                        if (lag > 1.0f) {
+                            unit.displayX = static_cast<float>(ev.x) - ddx / lag;
+                            unit.displayY = static_cast<float>(ev.y) - ddy / lag;
+                        }
+                        unit.moving = true;
+                        unit.animTick = SDL_GetTicks();
+                    } else if (ev.kind == T4CRemoteUnitEventKind::Spawn || ev.snapDisplay ||
+                               std::abs(dx) > 3 || std::abs(dy) > 3) {
+                        /* GetNearItems / combat snap : snap (HEAD, pas interpolation). */
+                        unit.displayX = static_cast<float>(ev.x);
+                        unit.displayY = static_cast<float>(ev.y);
+                        unit.moving = false;
+                        unit.animFrame = 0;
+                    } else if (dx != 0 || dy != 0) {
+                        unit.moving = true;
+                        unit.animTick = SDL_GetTicks();
+                    }
+                    unit.serverX = ev.x;
+                    unit.serverY = ev.y;
+                    if (ev.snapDisplay || ev.kind == T4CRemoteUnitEventKind::Attack) {
+                        unit.displayX = static_cast<float>(ev.x);
+                        unit.displayY = static_cast<float>(ev.y);
+                        unit.moving = false;
+                    }
+                } else if (firstSpawn) {
                     unit.initialized = true;
-                } else if (ev.kind == T4CRemoteUnitEventKind::Spawn || std::abs(dx) > 3 ||
-                           std::abs(dy) > 3) {
-                    /* Re-spawn (bande peripherique / GetNearItems) ou grand saut : snap sur la
-                     * position serveur, pas de sprite fantome fige a l'ancienne tuile. */
-                    unit.displayX = static_cast<float>(ev.x);
-                    unit.displayY = static_cast<float>(ev.y);
-                    unit.moving = false;
-                    unit.animFrame = 0;
-                } else if (dx != 0 || dy != 0) {
-                    unit.moving = true;
-                    unit.animTick = SDL_GetTicks();
                 }
-                unit.serverX = ev.x;
-                unit.serverY = ev.y;
                 if (ev.appearance != 0) {
                     unit.appearance = ev.appearance;
+                }
+                if (ev.kind == T4CRemoteUnitEventKind::Spawn || ev.kind == T4CRemoteUnitEventKind::Update) {
+                    unit.friendStatus = ev.friendStatus;
                 }
                 if (ev.kind == T4CRemoteUnitEventKind::Spawn || ev.kind == T4CRemoteUnitEventKind::Update ||
                     ev.kind == T4CRemoteUnitEventKind::Attack) {
@@ -820,6 +1058,16 @@ void GameWorldScreen::syncRemoteUnitsFromNetwork() {
                 }
                 break;
             }
+        }
+    }
+
+    /* Cadavres spawnes par GetNearItems (25xxx) = clones ; seule la sequence Die les affiche. */
+    for (auto it = remoteUnits_.begin(); it != remoteUnits_.end();) {
+        if (!it->second.dying && T4CIsCreatureCorpseAppearance(it->second.appearance)) {
+            T4CLoginSessionFinalizeRemoteUnitDeath(it->first);
+            it = remoteUnits_.erase(it);
+        } else {
+            ++it;
         }
     }
 
@@ -851,8 +1099,65 @@ void GameWorldScreen::noteBagItemUsed(const T4CBagItem &item) {
                                                : "Votre torche est eteinte.");
 }
 
-bool GameWorldScreen::isNpcUnit(const std::int32_t unitId, const std::uint16_t appearance) {
+bool GameWorldScreen::useBagItemByBaseId(const std::uint16_t baseId) {
+    T4CPlayerBackpack bp = backpack_;
+    if (!bp.valid) {
+        T4CLoginSessionGetBackpack(&bp);
+    }
+    if (!bp.valid) {
+        T4CLoginSessionPushSystemMessage("Sac indisponible.");
+        return false;
+    }
+    for (const T4CBagItem &item : bp.items) {
+        if (item.baseId != baseId) {
+            continue;
+        }
+        T4CLoginSessionSendUseBagItem(item.objectId);
+        noteBagItemUsed(item);
+        return true;
+    }
+    T4CLoginSessionPushSystemMessage("Objet introuvable dans le sac.");
+    return false;
+}
+
+bool GameWorldScreen::isNpcUnit(const std::int32_t unitId, const std::uint16_t appearance,
+                                const char friendStatus) const {
     if (unitId == 0) {
+        return false;
+    }
+    T4CActivePlayer active{};
+    T4CLoginSessionGetActivePlayer(&active);
+    if (active.valid && unitId == active.unitId) {
+        return false;
+    }
+    /* Windows VisualObjectList : VOL_NPC → curseur TALK / MouseAction grid 3. */
+    switch (static_cast<unsigned char>(friendStatus)) {
+        case static_cast<unsigned char>(kT4CVolCanTalk):
+            return true;
+        case static_cast<unsigned char>(kT4CVolCannotTalk):
+            return false;
+        case static_cast<unsigned char>(kT4CVolIsPlayer):
+        case static_cast<unsigned char>(kT4CVolIsMinions):
+            return false;
+        default:
+            break;
+    }
+    if ((appearance >= 10001 && appearance <= 10004) || (appearance >= 15001 && appearance <= 15004)) {
+        return false;
+    }
+    if (appearance >= 20000 && appearance <= 24999) {
+        return false;
+    }
+    /* PNJ humains / puppet (ex. 10011 Mithrand) quand le serveur n'a pas encore pousse Friend. */
+    return appearance >= 10001 && appearance < 20000;
+}
+
+bool GameWorldScreen::isMonsterUnit(const std::int32_t unitId, const std::uint16_t appearance,
+                                    const char friendStatus) const {
+    if (unitId == 0 || isNpcUnit(unitId, appearance, friendStatus)) {
+        return false;
+    }
+    if (const auto it = remoteUnits_.find(unitId); it != remoteUnits_.end() && it->second.dying) {
         return false;
     }
     T4CActivePlayer active{};
@@ -863,7 +1168,22 @@ bool GameWorldScreen::isNpcUnit(const std::int32_t unitId, const std::uint16_t a
     if ((appearance >= 10001 && appearance <= 10004) || (appearance >= 15001 && appearance <= 15004)) {
         return false;
     }
-    return true;
+    return appearance >= 20000 ||
+           static_cast<unsigned char>(friendStatus) == static_cast<unsigned char>(kT4CVolCannotTalk);
+}
+
+bool GameWorldScreen::isAnimatedGloveGroundObject(const std::uint16_t appearance) const {
+    if (isDoorLikeAppearance(appearance)) {
+        return true;
+    }
+    if (T4CIsChestGroundAppearance(appearance)) {
+        return false;
+    }
+    return appearance != 0;
+}
+
+bool GameWorldScreen::isUiPanelBlockingWorldCursor() const {
+    return showInventory_ || chestList_.valid || shopList_.valid || hasNpcSpeech_;
 }
 
 bool GameWorldScreen::HandleEvent(const SDL_Event &event) {
@@ -883,9 +1203,11 @@ bool GameWorldScreen::HandleEvent(const SDL_Event &event) {
 
     if (event.type == SDL_EVENT_KEY_DOWN && event.key.down &&
         (event.key.scancode == SDL_SCANCODE_ESCAPE || event.key.key == SDLK_ESCAPE)) {
-        if (shopList_.valid || hasNpcSpeech_) {
+        if (shopList_.valid || chestList_.valid || hasNpcSpeech_) {
             T4CLoginSessionSendBreakConversation();
             shopList_ = {};
+            T4CLoginSessionCloseChest();
+            chestList_ = {};
             hasNpcSpeech_ = false;
             return true;
         }
@@ -926,6 +1248,22 @@ bool GameWorldScreen::HandleEvent(const SDL_Event &event) {
         return true;
     }
 
+    if (event.type == SDL_EVENT_KEY_DOWN && event.key.down) {
+        switch (event.key.key) {
+            case SDLK_F2:
+                useBagItemByBaseId(40623);
+                return true;
+            case SDLK_F3:
+                useBagItemByBaseId(40004);
+                return true;
+            case SDLK_F4:
+                useBagItemByBaseId(40015);
+                return true;
+            default:
+                break;
+        }
+    }
+
     if (event.type == SDL_EVENT_KEY_DOWN && event.key.down && hasNpcSpeech_) {
         const int linkIdx = event.key.key - SDLK_1;
         if (linkIdx >= 0 && linkIdx < 9 &&
@@ -957,6 +1295,10 @@ bool GameWorldScreen::HandleEvent(const SDL_Event &event) {
             SDL_ConvertEventToRenderCoordinates(renderer_, &converted);
         }
         if (converted.button.button == SDL_BUTTON_LEFT) {
+            if (showInventory_ && invDrag_.active) {
+                finishInventoryDrop(converted.button.x, converted.button.y);
+                return true;
+            }
             endHoldMove();
             return true;
         }
@@ -979,96 +1321,71 @@ bool GameWorldScreen::HandleEvent(const SDL_Event &event) {
                 return true;
             }
             if (showInventory_) {
-                const T4CCharacterWindow::ClickResult cr =
-                    charWindow_.handleClick(kLogicalWidth, kLogicalHeight, mx, my, charTab_, equipment_,
-                                            backpack_, skillBook_, spellBook_, selectedBagIndex_);
-                if (cr.close) {
+                const T4CCharacterWindow::HitTestResult hit =
+                    charWindow_.hitTest(kLogicalWidth, kLogicalHeight, mx, my, charTab_, equipment_,
+                                        backpack_, skillBook_, spellBook_, selectedBagIndex_, invDragView());
+                if (hit.kind == T4CCharacterWindow::HitKind::Close) {
                     showInventory_ = false;
                     selectedBagIndex_ = -1;
+                    cancelInventoryDrag();
+                    return true;
                 }
-                if (cr.tabChanged) {
-                    charTab_ = cr.tab;
-                    selectedBagIndex_ = -1;
+                if (hit.kind == T4CCharacterWindow::HitKind::Tab) {
+                    if (hit.tab != charTab_) {
+                        charTab_ = hit.tab;
+                        selectedBagIndex_ = -1;
+                        cancelInventoryDrag();
+                    }
+                    return true;
                 }
-                switch (cr.action) {
-                    case T4CCharacterWindow::Action::SelectBagItem:
-                        /* Double-clic sur un objet du sac = l'utiliser (torche → eclairage…). */
-                        if (converted.button.clicks >= 2 && backpack_.valid && cr.index >= 0 &&
-                            static_cast<size_t>(cr.index) < backpack_.items.size()) {
-                            const T4CBagItem &item = backpack_.items[static_cast<size_t>(cr.index)];
+                if (charTab_ == T4CCharacterWindow::Tab::Inventory) {
+                    if (hit.kind == T4CCharacterWindow::HitKind::BagCell && hit.hasItem) {
+                        if (converted.button.clicks >= 2) {
+                            const T4CBagItem &item =
+                                backpack_.items[static_cast<size_t>(hit.index)];
                             T4CLoginSessionSendUseBagItem(item.objectId);
                             noteBagItemUsed(item);
-                            T4CLoginSessionRequestViewBackpack();
-                            T4CLoginSessionRequestViewEquipped();
-                            T4CLoginSessionRequestPlayerStatus();
+                            refreshInventoryViews();
+                            cancelInventoryDrag();
+                        } else {
+                            startInventoryDragFromBag(hit.index);
                         }
-                        selectedBagIndex_ = cr.index;
-                        break;
-                    case T4CCharacterWindow::Action::UnequipSlot:
-                        T4CLoginSessionSendUnequipObject(cr.slot);
-                        T4CGameMusic::PlaySfx("Equip");
-                        T4CLoginSessionRequestViewBackpack();
-                        T4CLoginSessionRequestViewEquipped();
-                        T4CLoginSessionRequestPlayerStatus();
-                        break;
-                    case T4CCharacterWindow::Action::EquipSelected:
-                    case T4CCharacterWindow::Action::UseSelected:
-                    case T4CCharacterWindow::Action::DropSelected:
-                    case T4CCharacterWindow::Action::JunkSelected: {
-                        if (backpack_.valid && cr.index >= 0 &&
-                            static_cast<size_t>(cr.index) < backpack_.items.size()) {
-                            const T4CBagItem &item = backpack_.items[static_cast<size_t>(cr.index)];
-                            const std::uint32_t qty = item.qty > 0 ? item.qty : 1u;
-                            if (cr.action == T4CCharacterWindow::Action::EquipSelected) {
-                                T4CLoginSessionSendEquipObject(item.objectId);
-                                T4CGameMusic::PlaySfx("Equip");
-                                selectedBagIndex_ = -1;
-                            } else if (cr.action == T4CCharacterWindow::Action::UseSelected) {
-                                T4CLoginSessionSendUseBagItem(item.objectId);
-                                noteBagItemUsed(item);
-                            } else if (cr.action == T4CCharacterWindow::Action::DropSelected) {
-                                T4CLoginSessionSendDropObject(item.objectId, qty);
-                                T4CGameMusic::PlaySfx("Generic drop item");
-                                selectedBagIndex_ = -1;
-                            } else {
-                                T4CLoginSessionSendJunkItems(item.objectId, qty);
-                                T4CGameMusic::PlaySfx("Generic drop item");
-                                selectedBagIndex_ = -1;
-                            }
-                            T4CLoginSessionRequestViewBackpack();
-                            T4CLoginSessionRequestViewEquipped();
-                            T4CLoginSessionRequestPlayerStatus();
-                            scheduleNearItemsRefresh();
-                        }
-                        break;
+                        return true;
                     }
-                    case T4CCharacterWindow::Action::UseSkill:
-                        if (skillBook_.valid && cr.index >= 0 &&
-                            static_cast<size_t>(cr.index) < skillBook_.skills.size()) {
-                            const T4CPlayerSkill &sk = skillBook_.skills[static_cast<size_t>(cr.index)];
-                            if (sk.useMode == 1) {
-                                T4CLoginSessionSendUseSkill(sk.skillId);
-                                T4CLoginSessionPushSystemMessage("Vous utilisez " + sk.name + ".");
-                            } else {
-                                T4CLoginSessionPushSystemMessage(
-                                    sk.useMode == 0 ? "Cette competence ne s'utilise pas directement."
-                                                    : "Competence a cible : non supportee ici.");
-                            }
-                        }
-                        break;
-                    case T4CCharacterWindow::Action::CastSpell:
-                        if (castSpellAtIndex(cr.index)) {
-                            showInventory_ = false;
-                        }
-                        break;
-                    case T4CCharacterWindow::Action::None:
-                        break;
+                    if (hit.kind == T4CCharacterWindow::HitKind::EquipSlot && hit.hasItem) {
+                        startInventoryDragFromEquip(hit.slot);
+                        return true;
+                    }
                 }
-                if (cr.consumed) {
+                if (hit.kind == T4CCharacterWindow::HitKind::Skill) {
+                    if (skillBook_.valid && hit.index >= 0 &&
+                        static_cast<size_t>(hit.index) < skillBook_.skills.size()) {
+                        const T4CPlayerSkill &sk = skillBook_.skills[static_cast<size_t>(hit.index)];
+                        if (sk.useMode == 1) {
+                            T4CLoginSessionSendUseSkill(sk.skillId);
+                            T4CLoginSessionPushSystemMessage("Vous utilisez " + sk.name + ".");
+                        } else {
+                            T4CLoginSessionPushSystemMessage(
+                                sk.useMode == 0 ? "Cette competence ne s'utilise pas directement."
+                                                : "Competence a cible : non supportee ici.");
+                        }
+                    }
+                    return true;
+                }
+                if (hit.kind == T4CCharacterWindow::HitKind::Spell) {
+                    if (castSpellAtIndex(hit.index)) {
+                        showInventory_ = false;
+                    }
+                    return true;
+                }
+                if (hit.kind != T4CCharacterWindow::HitKind::Outside) {
                     return true;
                 }
             }
             if (shopList_.valid && handleShopClick(mx, my)) {
+                return true;
+            }
+            if (chestList_.valid && handleChestClick(mx, my)) {
                 return true;
             }
             if (handleHudClick(mx, my)) {
@@ -1079,34 +1396,37 @@ bool GameWorldScreen::HandleEvent(const SDL_Event &event) {
             if (picked != 0) {
                 const auto it = remoteUnits_.find(picked);
                 const std::uint16_t appearance = it != remoteUnits_.end() ? it->second.appearance : 0;
+                const char friendStatus = it != remoteUnits_.end() ? it->second.friendStatus : kT4CVolCannotTalk;
                 if (it != remoteUnits_.end()) {
                     /* Nom reel (« Dark Fang », « Mithrand »…) pour l'etiquette de cible. */
                     T4CLoginSessionRequestUnitName(picked, it->second.serverX, it->second.serverY);
                 }
                 if (attackMode_) {
-                    /* Mode attaque (Ctrl+C) : tout clic sur une unite = attaque, PNJ inclus. */
                     tryAttackUnit(picked);
-                } else if (converted.button.clicks >= 2) {
-                    if (isNpcUnit(picked, appearance)) {
-                        tryTalkUnit(picked);
-                    } else {
-                        tryAttackUnit(picked);
-                    }
-                } else if (isNpcUnit(picked, appearance)) {
+                } else if (isNpcUnit(picked, appearance, friendStatus)) {
                     tryTalkUnit(picked);
+                } else if (isMonsterUnit(picked, appearance, friendStatus)) {
+                    tryAttackUnit(picked);
                 }
             } else if (selectedGroundId_ != 0) {
                 const auto it = groundObjects_.find(selectedGroundId_);
                 if (it != groundObjects_.end()) {
                     if (isDoorLikeAppearance(it->second.appearance)) {
-                        /* Porte : on l'utilise — le son suit le changement d'apparence serveur. */
+                        if (isMeleeRange(playerX_, playerY_, it->second.x, it->second.y)) {
+                            T4CLoginSessionSendUseObject(it->second.x, it->second.y, selectedGroundId_);
+                            T4CGameMusic::PlaySfx("Open Wooden Door");
+                        } else {
+                            pendingGround_.active = true;
+                            pendingGround_.pickup = false;
+                            pendingGround_.groundId = selectedGroundId_;
+                            pendingGround_.x = it->second.x;
+                            pendingGround_.y = it->second.y;
+                            cancelPendingAttack();
+                        }
+                    } else if (T4CIsChestGroundAppearance(it->second.appearance)) {
                         T4CLoginSessionSendUseObject(it->second.x, it->second.y, selectedGroundId_);
                     } else {
-                        /* Objet au sol : ramassage direct (Windows Grid==5 → RQ_GetObject). */
-                        T4CLoginSessionSendGetObject(it->second.x, it->second.y, selectedGroundId_);
-                        T4CGameMusic::PlaySfx("Generic pickup item");
-                        scheduleNearItemsRefresh();
-                        T4CLoginSessionRequestViewBackpack();
+                        tryPickupGroundObject(selectedGroundId_);
                     }
                 }
             } else if (!playerDead_ && !showGameMenu_ && !confirmReturnToLogin_) {
@@ -1186,6 +1506,87 @@ void GameWorldScreen::cancelPendingAttack() {
     pendingAttack_.talk = false;
 }
 
+void GameWorldScreen::cancelPendingGroundAction() {
+    pendingGround_.active = false;
+    pendingGround_.pickup = false;
+    pendingGround_.groundId = 0;
+}
+
+void GameWorldScreen::handleUnitLeftClick(const std::int32_t unitId, const std::uint16_t appearance,
+                                          const char friendStatus) {
+    if (unitId == 0 || playerDead_) {
+        return;
+    }
+    /* Windows : mode attaque (Ctrl+C) → tout clic sur unite Type>10000 = Combat. */
+    if (attackMode_) {
+        tryAttackUnit(unitId);
+        return;
+    }
+    if (isNpcUnit(unitId, appearance, friendStatus)) {
+        tryTalkUnit(unitId);
+        return;
+    }
+    if (isMonsterUnit(unitId, appearance, friendStatus)) {
+        tryAttackUnit(unitId);
+    }
+}
+
+bool GameWorldScreen::tryPickupGroundObject(const std::int32_t groundId) {
+    if (groundId == 0 || playerDead_) {
+        return false;
+    }
+    const auto it = groundObjects_.find(groundId);
+    if (it == groundObjects_.end()) {
+        return false;
+    }
+    const unsigned tx = it->second.x;
+    const unsigned ty = it->second.y;
+    if (isMeleeRange(playerX_, playerY_, tx, ty)) {
+        cancelPendingGroundAction();
+        T4CLoginSessionSendGetObject(tx, ty, groundId);
+        T4CGameMusic::PlaySfx("Generic pickup item");
+        scheduleNearItemsRefresh();
+        T4CLoginSessionRequestViewBackpack();
+        return true;
+    }
+    pendingGround_.active = true;
+    pendingGround_.pickup = true;
+    pendingGround_.groundId = groundId;
+    pendingGround_.x = tx;
+    pendingGround_.y = ty;
+    cancelPendingAttack();
+    return true;
+}
+
+void GameWorldScreen::updatePendingGroundAction() {
+    if (!pendingGround_.active) {
+        return;
+    }
+    const unsigned tx = pendingGround_.x;
+    const unsigned ty = pendingGround_.y;
+    if (isMeleeRange(playerX_, playerY_, tx, ty)) {
+        const std::int32_t groundId = pendingGround_.groundId;
+        const bool pickup = pendingGround_.pickup;
+        cancelPendingGroundAction();
+        if (pickup && groundId != 0) {
+            T4CLoginSessionSendGetObject(tx, ty, groundId);
+            T4CGameMusic::PlaySfx("Generic pickup item");
+            scheduleNearItemsRefresh();
+            T4CLoginSessionRequestViewBackpack();
+        } else if (groundId != 0) {
+            T4CLoginSessionSendUseObject(tx, ty, groundId);
+        }
+        return;
+    }
+    if (!canMove_) {
+        return;
+    }
+    const std::uint16_t opcode = moveOpcodeToward(playerX_, playerY_, tx, ty);
+    if (opcode != 0) {
+        tryMovePlayer(opcode);
+    }
+}
+
 bool GameWorldScreen::tryTalkUnit(const std::int32_t unitId) {
     if (unitId == 0 || playerDead_) {
         return false;
@@ -1240,7 +1641,7 @@ bool GameWorldScreen::tryAttackUnit(const std::int32_t unitId) {
 }
 
 void GameWorldScreen::updatePendingAttack() {
-    if (!pendingAttack_.active || !canMove_) {
+    if (!pendingAttack_.active) {
         return;
     }
 
@@ -1269,10 +1670,27 @@ void GameWorldScreen::updatePendingAttack() {
         return;
     }
 
+    if (!canMove_) {
+        return;
+    }
+
     const std::uint16_t opcode = moveOpcodeToward(playerX_, playerY_, tx, ty);
     if (opcode != 0) {
         tryMovePlayer(opcode);
     }
+}
+
+bool GameWorldScreen::isRemoteUnitSelectable(const RemoteUnitVisual &unit, const std::int32_t unitId) const {
+    if (unit.dying || unit.showCorpse) {
+        return false;
+    }
+    if (T4CIsPuppetAppearance(unit.appearance)) {
+        T4CPuppetDress dress{};
+        if (!T4CLoginSessionGetRemotePuppetDress(unitId, &dress)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 std::int32_t GameWorldScreen::pickUnitAtScreen(const float screenX, const float screenY) const {
@@ -1284,6 +1702,9 @@ std::int32_t GameWorldScreen::pickUnitAtScreen(const float screenX, const float 
     std::int32_t best = 0;
     float bestDist = 1e9f;
     for (const auto &entry : remoteUnits_) {
+        if (!isRemoteUnitSelectable(entry.second, entry.first)) {
+            continue;
+        }
         const float sx = worldToScreenX(entry.second.displayX, entry.second.displayY);
         const float sy = worldToScreenY(entry.second.displayX, entry.second.displayY);
         if (screenX < sx - kHalfW || screenX > sx + kHalfW || screenY < sy - kUp || screenY > sy + kDown) {
@@ -1354,83 +1775,104 @@ void GameWorldScreen::drawUnitOutline(SDL_Renderer *renderer, const float sx, co
     if (!renderer || !spritesLoaded_) {
         return;
     }
-    int direction = 2;
+    const auto it = remoteUnits_.find(unitId);
+    if (it == remoteUnits_.end() || !isRemoteUnitSelectable(it->second, unitId)) {
+        return;
+    }
+    int direction = it->second.direction;
     int frame = 0;
     bool attacking = false;
-    if (const auto it = remoteUnits_.find(unitId); it != remoteUnits_.end()) {
-        direction = it->second.direction;
-        attacking = it->second.attacking;
-        frame = attacking ? it->second.attackAnimFrame
-                          : (it->second.moving ? it->second.animFrame : 0);
-    }
+    bool moving = false;
+    attacking = it->second.attacking;
+    moving = it->second.moving;
+    frame = attacking ? it->second.attackAnimFrame
+                      : (moving ? it->second.animFrame : it->second.idleAnimFrame);
+    const bool idleStanding = !moving && !attacking;
     const T4CUnitSpriteView view = T4CUnitSpriteViewFromDirection(direction);
     if (T4CIsPuppetAppearance(appearance)) {
         T4CPuppetDress dress{};
         if (!T4CLoginSessionGetRemotePuppetDress(unitId, &dress)) {
-            dress.body = 425;
-            dress.legs = 284;
-            dress.feet = 285;
-            dress.known = true;
+            return;
         }
-        const char *fallback = T4CPuppetFallbackSpriteName(dress, appearance == 10012 || appearance == 15012);
-        if (fallback) {
-            const std::string frameName =
-                attacking ? T4CUnitAttackSpriteFrameName(fallback, view, frame)
-                          : T4CUnitSpriteFrameName(fallback, view, frame);
-            if (!frameName.empty() &&
-                spriteAtlas_.TryDrawSpriteOutline(renderer, frameName, sx, sy, 100, 220, 255, view.mirror)) {
-                return;
-            }
+        const bool female = appearance == 10012 || appearance == 15012;
+        const int puppetFrame = (idleStanding && !attacking) ? 0 : frame;
+        /* Contour cible : CL_WHITE comme Windows (VisualObjectList.cpp dwOutlineColor = CL_WHITE). */
+        if (T4CPuppetTryDrawOutline(spriteAtlas_, renderer, dress, female, direction, puppetFrame, sx, sy, attacking,
+                                    255, 255, 255)) {
+            return;
         }
+        if (tryDrawNpcOutline(spriteAtlas_, renderer, T4CPuppetFallbackSpriteName(dress, female), sx, sy, direction,
+                              puppetFrame, attacking, idleStanding)) {
+            return;
+        }
+        return;
     }
     const char *base = T4CRemoteUnitSpriteName(unitId, appearance);
     if (!base) {
         return;
     }
-    const std::string frameName = attacking ? T4CUnitAttackSpriteFrameName(base, view, frame)
-                                            : T4CUnitSpriteFrameName(base, view, frame);
+    if (tryDrawNpcOutline(spriteAtlas_, renderer, base, sx, sy, direction, frame, attacking, idleStanding)) {
+        return;
+    }
+    const int frameIndex = (idleStanding && !attacking) ? 0 : frame;
+    const std::string frameName = attacking ? T4CUnitAttackSpriteFrameName(base, view, frameIndex)
+                                            : T4CUnitSpriteFrameName(base, view, frameIndex);
     if (!frameName.empty() &&
-        spriteAtlas_.TryDrawSpriteOutline(renderer, frameName, sx, sy, 100, 220, 255, view.mirror)) {
+        spriteAtlas_.TryDrawSpriteOutline(renderer, frameName, sx, sy, 255, 255, 255, view.mirror)) {
         return;
     }
-    if (spriteAtlas_.TryDrawSpriteOutline(renderer, base, sx, sy, 100, 220, 255, view.mirror)) {
-        return;
-    }
-    SDL_SetRenderDrawColor(renderer, 100, 220, 255, 255);
-    SDL_FRect box{sx - 20.f, sy - 60.f, 40.f, 68.f};
-    SDL_RenderRect(renderer, &box);
+    (void)spriteAtlas_.TryDrawSpriteOutline(renderer, base, sx, sy, 255, 255, 255, view.mirror);
 }
 
 void GameWorldScreen::renderDialoguePanel(SDL_Renderer *renderer) const {
     if (!renderer || !hasNpcSpeech_) {
         return;
     }
-    SDL_FRect panel{20.f, static_cast<float>(kLogicalHeight) - 170.f,
-                    static_cast<float>(kLogicalWidth) - 40.f, 150.f};
-    SDL_SetRenderDrawColor(renderer, 10, 20, 40, 220);
+    const float panelX = 20.f;
+    const float panelY = static_cast<float>(kLogicalHeight) - 220.f;
+    const float panelW = static_cast<float>(kLogicalWidth) - 40.f;
+    const float panelH = 200.f;
+    SDL_FRect panel{panelX, panelY, panelW, panelH};
+    SDL_SetRenderDrawColor(renderer, 10, 20, 40, 230);
     SDL_RenderFillRect(renderer, &panel);
+    SDL_SetRenderDrawColor(renderer, 110, 100, 70, 255);
+    SDL_RenderRect(renderer, &panel);
+
+    SDL_Rect clip{static_cast<int>(panel.x + 4.f), static_cast<int>(panel.y + 4.f),
+                  static_cast<int>(panel.w - 8.f), static_cast<int>(panel.h - 8.f)};
+    SDL_SetRenderClipRect(renderer, &clip);
+
     char title[128];
     std::snprintf(title, sizeof(title), "%s:",
                     npcSpeech_.speakerName.empty() ? "PNJ" : npcSpeech_.speakerName.c_str());
-    drawHudText(renderer, title, 28.f, static_cast<float>(kLogicalHeight) - 162.f);
-    drawHudText(renderer, npcSpeech_.text.c_str(), 28.f, static_cast<float>(kLogicalHeight) - 142.f);
-    float linkY = static_cast<float>(kLogicalHeight) - 110.f;
+    drawHudText(renderer, title, panelX + 8.f, panelY + 8.f);
+    drawWrappedHudText(renderer, npcSpeech_.text.c_str(), panelX + 8.f, panelY + 28.f, panelW - 16.f,
+                       16.f, 7);
+
+    float linkY = panelY + panelH - 8.f - static_cast<float>(npcSpeech_.links.size()) * 16.f;
+    if (linkY < panelY + 28.f) {
+        linkY = panelY + 28.f;
+    }
     for (size_t i = 0; i < npcSpeech_.links.size() && i < 9; ++i) {
         char line[160];
         std::snprintf(line, sizeof(line), "%zu: [%s]", i + 1, npcSpeech_.links[i].c_str());
-        drawHudText(renderer, line, 28.f, linkY);
+        drawHudText(renderer, line, panelX + 8.f, linkY);
         linkY += 16.f;
     }
+    SDL_SetRenderClipRect(renderer, nullptr);
 }
 
 namespace {
 
-constexpr SDL_FRect kShopPanel{static_cast<float>(GameWorldScreen::kLogicalWidth) - 340.f, 80.f, 320.f,
-                               372.f};
-constexpr float kShopRowY = kShopPanel.y + 46.f;
-constexpr float kShopRowH = 18.f;
-constexpr int kShopMaxRows = 16;
-constexpr SDL_FRect kShopClose{kShopPanel.x + kShopPanel.w - 26.f, kShopPanel.y + 4.f, 22.f, 18.f};
+constexpr float kShopPanelW = 384.f;
+constexpr float kShopPanelH = 420.f;
+constexpr float kShopPanelX = (static_cast<float>(GameWorldScreen::kLogicalWidth) - kShopPanelW) * 0.5f;
+constexpr float kShopPanelY = 72.f;
+constexpr SDL_FRect kShopPanel{kShopPanelX, kShopPanelY, kShopPanelW, kShopPanelH};
+constexpr float kShopRowY = kShopPanel.y + 64.f;
+constexpr float kShopRowH = 20.f;
+constexpr int kShopMaxRows = 14;
+constexpr SDL_FRect kShopClose{kShopPanel.x + kShopPanel.w - 26.f, kShopPanel.y + 6.f, 22.f, 18.f};
 
 bool PointInRect(const float x, const float y, const SDL_FRect &r) {
     return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
@@ -1447,62 +1889,83 @@ void GameWorldScreen::renderShopPanel(SDL_Renderer *renderer) const {
     switch (shopList_.mode) {
         case T4CShopMode::Buy:
             title = "Achat";
-            hint = "Clic: acheter 1";
+            hint = "Clic sur une ligne : acheter 1";
             break;
         case T4CShopMode::Sell:
             title = "Vente";
-            hint = "Clic: vendre 1";
+            hint = "Clic sur une ligne : vendre 1";
             break;
         case T4CShopMode::Train:
             title = "Entrainement";
-            hint = "Clic: +1 point";
+            hint = "Clic : +1 point de compétence";
             break;
         case T4CShopMode::Learn:
             title = "Apprentissage";
-            hint = "Clic: apprendre";
+            hint = "Clic : apprendre";
             break;
         default:
             break;
     }
-    SDL_SetRenderDrawColor(renderer, 30, 30, 50, 235);
+    SDL_SetRenderDrawColor(renderer, 24, 24, 42, 245);
     SDL_RenderFillRect(renderer, &kShopPanel);
-    SDL_SetRenderDrawColor(renderer, 110, 100, 70, 255);
+    SDL_SetRenderDrawColor(renderer, 140, 120, 70, 255);
     SDL_RenderRect(renderer, &kShopPanel);
-    char header[96];
+    char header[128];
     if (shopList_.mode == T4CShopMode::Train || shopList_.mode == T4CShopMode::Learn) {
-        std::snprintf(header, sizeof(header), "%s (pts:%u)", title,
+        std::snprintf(header, sizeof(header), "%s — points : %u", title,
                       static_cast<unsigned>(shopList_.skillPoints));
     } else {
-        std::snprintf(header, sizeof(header), "%s (or:%u)", title, shopList_.gold);
+        std::snprintf(header, sizeof(header), "%s — or : %u — %zu article(s)", title, shopList_.gold,
+                      shopList_.items.size());
     }
-    drawHudText(renderer, header, kShopPanel.x + 8.f, kShopPanel.y + 8.f);
-    drawHudText(renderer, hint, kShopPanel.x + 8.f, kShopPanel.y + 26.f);
+    drawHudText(renderer, header, kShopPanel.x + 10.f, kShopPanel.y + 10.f);
+    drawHudText(renderer, hint, kShopPanel.x + 10.f, kShopPanel.y + 28.f);
+    drawHudText(renderer, "Objet", kShopPanel.x + 12.f, kShopPanel.y + 46.f);
+    drawHudText(renderer, "Prix", kShopPanel.x + kShopPanel.w - 72.f, kShopPanel.y + 46.f);
+    SDL_SetRenderDrawColor(renderer, 80, 72, 48, 255);
+    SDL_FRect headerLine{kShopPanel.x + 8.f, kShopPanel.y + 58.f, kShopPanel.w - 16.f, 1.f};
+    SDL_RenderFillRect(renderer, &headerLine);
     SDL_SetRenderDrawColor(renderer, 90, 40, 36, 255);
     SDL_RenderFillRect(renderer, &kShopClose);
     drawHudText(renderer, "X", kShopClose.x + 7.f, kShopClose.y + 3.f);
+
+    if (shopList_.items.empty()) {
+        drawHudText(renderer, "(liste vide — parlez au marchand)", kShopPanel.x + 12.f, kShopRowY + 8.f);
+        return;
+    }
 
     const bool hovered = mouseValid_;
     for (size_t i = 0; i < shopList_.items.size() && i < static_cast<size_t>(kShopMaxRows); ++i) {
         const T4CShopEntry &item = shopList_.items[i];
         const float ry = kShopRowY + static_cast<float>(i) * kShopRowH;
-        SDL_FRect row{kShopPanel.x + 4.f, ry, kShopPanel.w - 8.f, kShopRowH};
+        SDL_FRect row{kShopPanel.x + 8.f, ry, kShopPanel.w - 16.f, kShopRowH - 2.f};
+        if (i % 2 == 0) {
+            SDL_SetRenderDrawColor(renderer, 34, 34, 56, 255);
+            SDL_RenderFillRect(renderer, &row);
+        }
         if (hovered && mouseX_ >= row.x && mouseX_ < row.x + row.w && mouseY_ >= row.y &&
             mouseY_ < row.y + row.h) {
-            SDL_SetRenderDrawColor(renderer, 60, 58, 90, 255);
+            SDL_SetRenderDrawColor(renderer, 70, 66, 110, 255);
             SDL_RenderFillRect(renderer, &row);
         }
         char line[192];
         if (shopList_.mode == T4CShopMode::Train) {
-            std::snprintf(line, sizeof(line), "%s — %u (max %u)",
-                          item.name.empty() ? "?" : item.name.c_str(), item.price, item.maxQty);
+            std::snprintf(line, sizeof(line), "%s", item.name.empty() ? "?" : item.name.c_str());
+            drawHudText(renderer, line, row.x + 4.f, ry + 3.f);
+            std::snprintf(line, sizeof(line), "%u (max %u)", item.price, item.maxQty);
+            drawHudText(renderer, line, kShopPanel.x + kShopPanel.w - 88.f, ry + 3.f);
         } else if (shopList_.mode == T4CShopMode::Sell) {
-            std::snprintf(line, sizeof(line), "%s — %u or (x%u)",
-                          item.name.empty() ? "?" : item.name.c_str(), item.price, item.maxQty);
+            std::snprintf(line, sizeof(line), "%s x%u", item.name.empty() ? "?" : item.name.c_str(),
+                          item.maxQty);
+            drawHudText(renderer, line, row.x + 4.f, ry + 3.f);
+            std::snprintf(line, sizeof(line), "%u or", item.price);
+            drawHudText(renderer, line, kShopPanel.x + kShopPanel.w - 88.f, ry + 3.f);
         } else {
-            std::snprintf(line, sizeof(line), "%s — %u or", item.name.empty() ? "?" : item.name.c_str(),
-                          item.price);
+            std::snprintf(line, sizeof(line), "%s", item.name.empty() ? "?" : item.name.c_str());
+            drawHudText(renderer, line, row.x + 4.f, ry + 3.f);
+            std::snprintf(line, sizeof(line), "%u or", item.price);
+            drawHudText(renderer, line, kShopPanel.x + kShopPanel.w - 88.f, ry + 3.f);
         }
-        drawHudText(renderer, line, row.x + 4.f, ry + 4.f);
     }
 }
 
@@ -1554,6 +2017,68 @@ bool GameWorldScreen::handleShopClick(const float mx, const float my) {
     return true;
 }
 
+void GameWorldScreen::renderChestPanel(SDL_Renderer *renderer) const {
+    if (!renderer || !chestList_.valid) {
+        return;
+    }
+    SDL_SetRenderDrawColor(renderer, 28, 22, 18, 245);
+    SDL_RenderFillRect(renderer, &kShopPanel);
+    SDL_SetRenderDrawColor(renderer, 140, 100, 50, 255);
+    SDL_RenderRect(renderer, &kShopPanel);
+    char header[128];
+    std::snprintf(header, sizeof(header), "Coffre — %zu objet(s)", chestList_.items.size());
+    drawHudText(renderer, header, kShopPanel.x + 10.f, kShopPanel.y + 10.f);
+    drawHudText(renderer, "Clic sur une ligne : prendre 1", kShopPanel.x + 10.f, kShopPanel.y + 28.f);
+    drawHudText(renderer, "Objet", kShopPanel.x + 12.f, kShopPanel.y + 46.f);
+    drawHudText(renderer, "Qté", kShopPanel.x + kShopPanel.w - 72.f, kShopPanel.y + 46.f);
+    SDL_SetRenderDrawColor(renderer, 80, 72, 48, 255);
+    SDL_FRect headerLine{kShopPanel.x + 8.f, kShopPanel.y + 58.f, kShopPanel.w - 16.f, 1.f};
+    SDL_RenderFillRect(renderer, &headerLine);
+    drawHudText(renderer, "X", kShopClose.x + 6.f, kShopClose.y + 1.f);
+    if (chestList_.items.empty()) {
+        drawHudText(renderer, "(coffre vide)", kShopPanel.x + 12.f, kShopRowY + 8.f);
+        return;
+    }
+    for (size_t i = 0; i < chestList_.items.size() && i < static_cast<size_t>(kShopMaxRows); ++i) {
+        const T4CChestItem &item = chestList_.items[i];
+        const float ry = kShopRowY + static_cast<float>(i) * kShopRowH;
+        SDL_FRect row{kShopPanel.x + 8.f, ry, kShopPanel.w - 16.f, kShopRowH - 2.f};
+        if (i % 2 == 0) {
+            SDL_SetRenderDrawColor(renderer, 40, 34, 28, 220);
+            SDL_RenderFillRect(renderer, &row);
+        }
+        char line[160];
+        std::snprintf(line, sizeof(line), "%s", item.name.empty() ? "?" : item.name.c_str());
+        drawHudText(renderer, line, row.x + 4.f, ry + 3.f);
+        std::snprintf(line, sizeof(line), "%u", static_cast<unsigned>(item.qty > 0 ? item.qty : 1u));
+        drawHudText(renderer, line, kShopPanel.x + kShopPanel.w - 88.f, ry + 3.f);
+    }
+}
+
+bool GameWorldScreen::handleChestClick(const float mx, const float my) {
+    if (!chestList_.valid || !PointInRect(mx, my, kShopPanel)) {
+        return false;
+    }
+    if (PointInRect(mx, my, kShopClose)) {
+        T4CLoginSessionCloseChest();
+        chestList_ = {};
+        return true;
+    }
+    const int row = static_cast<int>((my - kShopRowY) / kShopRowH);
+    if (my < kShopRowY || row < 0 || static_cast<size_t>(row) >= chestList_.items.size() ||
+        row >= kShopMaxRows) {
+        return true;
+    }
+    const T4CChestItem &item = chestList_.items[static_cast<size_t>(row)];
+    const std::uint32_t qty = item.qty > 0 ? item.qty : 1u;
+    T4CLoginSessionSendChestTakeItem(item.objectId, qty > 1 ? 1u : qty);
+    T4CGameMusic::PlaySfx("Generic pickup item");
+    T4CLoginSessionRequestViewBackpack();
+    T4CLoginSessionRequestPlayerStatus();
+    /* Windows V3_ChestDlg : envoi 108 seulement ; le serveur pousse l'objet sol via opcode 10004. */
+    return true;
+}
+
 bool GameWorldScreen::handleHudClick(const float mx, const float my) {
     const SDL_FRect home = T4CGameHud::homeButtonRect(kLogicalWidth, kLogicalHeight);
     if (PointInRect(mx, my, home)) {
@@ -1573,15 +2098,27 @@ bool GameWorldScreen::handleHudClick(const float mx, const float my) {
         T4CGameMusic::PlaySfx("Button release sound");
         return true;
     }
-    /* Slots macro 1-12 : sort n du grimoire (defaut Windows : macros remplies par drag). */
+    const SDL_FRect chatInput = T4CGameHud::chatInputRect(kLogicalWidth, kLogicalHeight);
+    if (PointInRect(mx, my, chatInput)) {
+        openChatInput();
+        return true;
+    }
+    /* Slots macro 1-12 : objets par defaut F2-F4 (slots 1-3), sorts pour le reste. */
     for (int slot = 0; slot < 12; ++slot) {
         const SDL_FRect r = T4CGameHud::macroSlotRect(kLogicalWidth, kLogicalHeight, slot);
-        if (PointInRect(mx, my, r)) {
-            if (spellBook_.valid && static_cast<size_t>(slot) < spellBook_.spells.size()) {
-                castSpellAtIndex(slot);
-            }
-            return true;
+        if (!PointInRect(mx, my, r)) {
+            continue;
         }
+        for (int m = 0; m < T4CGameHud::kDefaultItemMacroCount; ++m) {
+            if (T4CGameHud::kDefaultItemMacros[m].slot == slot) {
+                useBagItemByBaseId(T4CGameHud::kDefaultItemMacros[m].baseId);
+                return true;
+            }
+        }
+        if (spellBook_.valid && static_cast<size_t>(slot) < spellBook_.spells.size()) {
+            castSpellAtIndex(slot);
+        }
+        return true;
     }
     /* Fond des panneaux HUD : consomme le clic (pas de marche sous la MainBar/TMI/Life). */
     const SDL_FRect mainBar{static_cast<float>((kLogicalWidth - T4CGameHud::kMainBarW) / 2),
@@ -1608,14 +2145,30 @@ bool GameWorldScreen::castSpellAtIndex(const int index) {
         if (const auto it = remoteUnits_.find(selectedUnitId_); it != remoteUnits_.end()) {
             T4CLoginSessionSendCastSpell(spell.spellId, it->second.serverX, it->second.serverY,
                                          selectedUnitId_);
+            triggerLocalCastAnim(it->second.serverX, it->second.serverY);
             T4CLoginSessionPushSystemMessage("Sort " + spell.name + " sur la cible.");
             return true;
         }
     }
-    /* Pas de cible : lancer sur soi (V3_SpellDlg coords 0,0 id 0). */
+    T4CActivePlayer active{};
+    T4CLoginSessionGetActivePlayer(&active);
+    triggerLocalCastAnim(active.serverX, active.serverY);
     T4CLoginSessionSendCastSpell(spell.spellId, 0, 0, 0);
     T4CLoginSessionPushSystemMessage("Sort " + spell.name + ".");
     return true;
+}
+
+void GameWorldScreen::triggerLocalCastAnim(const unsigned targetX, const unsigned targetY) {
+    const Uint32 now = SDL_GetTicks();
+    playerAttacking_ = true;
+    playerAttackFrame_ = 0;
+    playerAttackTick_ = now;
+    playerAttackUntil_ = now + 420;
+    const int ddx = static_cast<int>(targetX) - static_cast<int>(playerX_);
+    const int ddy = static_cast<int>(targetY) - static_cast<int>(playerY_);
+    if (ddx != 0 || ddy != 0) {
+        playerDirection_ = T4CDirectionFromWorldDelta(ddx, ddy);
+    }
 }
 
 namespace {
@@ -1725,6 +2278,13 @@ void GameWorldScreen::sendChatLine(const std::string &rawLine) {
             T4CLoginSessionPushSystemMessage("Usage : /Nom message");
         }
         return;
+    }
+    T4CTalkState talk{};
+    T4CLoginSessionGetTalkState(&talk);
+    if (talk.active && talk.unitId != 0) {
+        if (T4CLoginSessionSendDirectedTalkMessage(line)) {
+            return;
+        }
     }
     if (T4CLoginSessionSendChatLocal(line)) {
         /* Echo local immediat (le serveur rebroadcast en 27 pour les autres). */
@@ -2077,7 +2637,159 @@ void GameWorldScreen::renderInventoryPanel(SDL_Renderer *renderer) const {
     T4CActivePlayer active{};
     T4CLoginSessionGetActivePlayer(&active);
     charWindow_.render(renderer, spriteAtlas_, uiFont_, kLogicalWidth, kLogicalHeight, charTab_, active,
-                       playerStatus_, equipment_, backpack_, skillBook_, spellBook_);
+                       playerStatus_, equipment_, backpack_, skillBook_, spellBook_, selectedBagIndex_,
+                       invDragView());
+    drawInventoryDragCursor(renderer);
+}
+
+const T4CEquippedItem *GameWorldScreen::findEquippedItem(const T4CEquipSlot slot) const {
+    for (const T4CEquippedItem &it : equipment_.items) {
+        if (it.slot == slot && it.appearance != 0) {
+            return &it;
+        }
+    }
+    return nullptr;
+}
+
+T4CCharacterWindow::InvDragView GameWorldScreen::invDragView() const {
+    T4CCharacterWindow::InvDragView view{};
+    if (invDrag_.active) {
+        view.active = true;
+        view.fromEquip = invDrag_.fromEquip;
+        view.bagIndex = invDrag_.bagIndex;
+        view.equipSlot = invDrag_.equipSlot;
+    }
+    return view;
+}
+
+void GameWorldScreen::startInventoryDragFromBag(const int index) {
+    if (!backpack_.valid || index < 0 || static_cast<size_t>(index) >= backpack_.items.size()) {
+        return;
+    }
+    const T4CBagItem &item = backpack_.items[static_cast<size_t>(index)];
+    invDrag_ = {};
+    invDrag_.active = true;
+    invDrag_.bagIndex = index;
+    invDrag_.objectId = item.objectId;
+    invDrag_.appearance = item.appearance;
+    invDrag_.qty = item.qty > 0 ? item.qty : 1u;
+    selectedBagIndex_ = index;
+    T4CGameMusic::PlaySfx("Equip");
+}
+
+void GameWorldScreen::startInventoryDragFromEquip(const T4CEquipSlot slot) {
+    const T4CEquippedItem *item = findEquippedItem(slot);
+    if (item == nullptr) {
+        return;
+    }
+    invDrag_ = {};
+    invDrag_.active = true;
+    invDrag_.fromEquip = true;
+    invDrag_.equipSlot = slot;
+    invDrag_.objectId = item->objectId;
+    invDrag_.appearance = item->appearance;
+    invDrag_.qty = item->qty > 0 ? item->qty : 1u;
+    selectedBagIndex_ = -1;
+    T4CGameMusic::PlaySfx("Equip");
+}
+
+void GameWorldScreen::cancelInventoryDrag() {
+    invDrag_ = {};
+}
+
+void GameWorldScreen::refreshInventoryViews() {
+    T4CLoginSessionRequestViewBackpack();
+    T4CLoginSessionRequestViewEquipped();
+    T4CLoginSessionRequestPlayerStatus();
+}
+
+void GameWorldScreen::applyInventoryDragAction(const T4CCharacterWindow::Action action) {
+    if (!invDrag_.active || invDrag_.objectId == 0) {
+        return;
+    }
+    const std::uint32_t qty = invDrag_.qty > 0 ? invDrag_.qty : 1u;
+    switch (action) {
+        case T4CCharacterWindow::Action::EquipSelected:
+            if (!invDrag_.fromEquip) {
+                T4CLoginSessionSendEquipObject(invDrag_.objectId);
+                T4CGameMusic::PlaySfx("Equip");
+            }
+            break;
+        case T4CCharacterWindow::Action::UseSelected:
+            T4CLoginSessionSendUseBagItem(invDrag_.objectId);
+            if (!invDrag_.fromEquip && invDrag_.bagIndex >= 0 && backpack_.valid &&
+                static_cast<size_t>(invDrag_.bagIndex) < backpack_.items.size()) {
+                noteBagItemUsed(backpack_.items[static_cast<size_t>(invDrag_.bagIndex)]);
+            }
+            break;
+        case T4CCharacterWindow::Action::DropSelected:
+            T4CLoginSessionSendDropObject(invDrag_.objectId, qty);
+            T4CGameMusic::PlaySfx("Generic drop item");
+            scheduleNearItemsRefresh();
+            break;
+        case T4CCharacterWindow::Action::JunkSelected:
+            T4CLoginSessionSendJunkItems(invDrag_.objectId, qty);
+            T4CGameMusic::PlaySfx("Generic drop item");
+            break;
+        default:
+            return;
+    }
+    refreshInventoryViews();
+    cancelInventoryDrag();
+    selectedBagIndex_ = -1;
+}
+
+void GameWorldScreen::finishInventoryDrop(const float mx, const float my) {
+    if (!invDrag_.active) {
+        return;
+    }
+    const T4CCharacterWindow::HitTestResult hit =
+        charWindow_.hitTest(kLogicalWidth, kLogicalHeight, mx, my, charTab_, equipment_, backpack_,
+                            skillBook_, spellBook_, selectedBagIndex_, invDragView());
+
+    switch (hit.kind) {
+        case T4CCharacterWindow::HitKind::EquipSlot:
+            if (!invDrag_.fromEquip && invDrag_.objectId != 0) {
+                T4CLoginSessionSendEquipObject(invDrag_.objectId);
+                T4CGameMusic::PlaySfx("Equip");
+                refreshInventoryViews();
+            } else if (invDrag_.fromEquip) {
+                T4CLoginSessionSendUnequipObject(invDrag_.equipSlot);
+                T4CGameMusic::PlaySfx("Equip");
+                refreshInventoryViews();
+            }
+            break;
+        case T4CCharacterWindow::HitKind::BagCell:
+            if (invDrag_.fromEquip) {
+                T4CLoginSessionSendUnequipObject(invDrag_.equipSlot);
+                T4CGameMusic::PlaySfx("Equip");
+                refreshInventoryViews();
+            }
+            break;
+        case T4CCharacterWindow::HitKind::ActionButton:
+            applyInventoryDragAction(hit.action);
+            return;
+        case T4CCharacterWindow::HitKind::Outside:
+            if (!invDrag_.fromEquip && invDrag_.objectId != 0) {
+                T4CLoginSessionSendDropObject(invDrag_.objectId, invDrag_.qty > 0 ? invDrag_.qty : 1u);
+                T4CGameMusic::PlaySfx("Generic drop item");
+                refreshInventoryViews();
+                scheduleNearItemsRefresh();
+            }
+            break;
+        default:
+            break;
+    }
+    cancelInventoryDrag();
+}
+
+void GameWorldScreen::drawInventoryDragCursor(SDL_Renderer *renderer) const {
+    if (!renderer || !invDrag_.active || invDrag_.appearance == 0 || !mouseValid_) {
+        return;
+    }
+    if (const char *sprite = T4CGroundObjectSpriteName(invDrag_.appearance); sprite != nullptr) {
+        spriteAtlas_.TryDrawSpriteByName(renderer, sprite, mouseX_, mouseY_);
+    }
 }
 
 void GameWorldScreen::drawTargetHpBar(SDL_Renderer *renderer, const float sx, const float sy,
@@ -2114,6 +2826,7 @@ void GameWorldScreen::Update() {
     }
 
     T4CLoginSessionPollBackgroundTasks();
+    pollDeferredSpritePreload(6);
 
     const Uint32 now = SDL_GetTicks();
 
@@ -2177,8 +2890,12 @@ void GameWorldScreen::Update() {
         T4CLoginSessionRequestNearItems();
         scheduleNearItemsRefresh();
         refreshZoneMusic(true);
-        canMove_ = true;
+        canMove_ = false;
         moveServerTimeoutUntil_ = 0;
+    }
+
+    if (ready_ && !T4CLoginSessionIsWorldSessionReady()) {
+        canMove_ = false;
     }
 
     syncRemoteUnitsFromNetwork();
@@ -2192,8 +2909,11 @@ void GameWorldScreen::Update() {
     if (T4CLoginSessionConsumeLocalPlayerMove(&serverX, &serverY, &serverMoveOp)) {
         applyServerPlayerMove(serverX, serverY, serverMoveOp);
     } else if (!canMove_ && moveServerTimeoutUntil_ != 0 && now >= moveServerTimeoutUntil_) {
-        canMove_ = true;
+        canMove_ = T4CLoginSessionIsWorldSessionReady();
         moveServerTimeoutUntil_ = 0;
+    } else if (ready_ && !canMove_ && moveServerTimeoutUntil_ == 0 && !playerDead_ &&
+               T4CLoginSessionIsWorldSessionReady()) {
+        canMove_ = true;
     }
 
     T4CPlayerStatus updated{};
@@ -2202,21 +2922,16 @@ void GameWorldScreen::Update() {
     }
 
     updatePendingAttack();
+    updatePendingGroundAction();
 
     {
         unsigned atx = 0;
         unsigned aty = 0;
         if (T4CLoginSessionConsumeLocalAttack(&atx, &aty)) {
-            const Uint32 now = SDL_GetTicks();
-            playerAttacking_ = true;
-            playerAttackFrame_ = 0;
-            playerAttackTick_ = now;
-            playerAttackUntil_ = now + 70 * kT4CAttackAnimFrames;
-            const int ddx = static_cast<int>(atx) - static_cast<int>(playerX_);
-            const int ddy = static_cast<int>(aty) - static_cast<int>(playerY_);
-            if (ddx != 0 || ddy != 0) {
-                playerDirection_ = T4CDirectionFromWorldDelta(ddx, ddy);
-            }
+            triggerLocalCastAnim(atx, aty);
+            playerAttackUntil_ = SDL_GetTicks() + 70 * kT4CAttackAnimFrames;
+        } else if (T4CLoginSessionConsumeLocalCast(&atx, &aty)) {
+            triggerLocalCastAnim(atx, aty);
         }
     }
     if (playerAttacking_) {
@@ -2227,6 +2942,11 @@ void GameWorldScreen::Update() {
         } else if (now - playerAttackTick_ >= 70) {
             playerAttackFrame_ = (playerAttackFrame_ + 1) % kT4CAttackAnimFrames;
             playerAttackTick_ = now;
+        }
+    } else if (!isPlayerWalkAnimActive()) {
+        if (now - playerIdleAnimTick_ >= static_cast<Uint32>(kT4CIdleAnimTickMs)) {
+            playerIdleAnimFrame_ = T4CWalkAnimNextIdleFrame(playerIdleAnimFrame_);
+            playerIdleAnimTick_ = now;
         }
     }
 
@@ -2291,6 +3011,20 @@ void GameWorldScreen::Update() {
     T4CShopList shop{};
     if (T4CLoginSessionConsumeShopList(&shop)) {
         shopList_ = std::move(shop);
+    } else {
+        T4CLoginSessionGetShopList(&shop);
+        if (shop.valid) {
+            shopList_ = shop;
+        }
+    }
+    T4CChestList chest{};
+    if (T4CLoginSessionConsumeChestList(&chest)) {
+        chestList_ = std::move(chest);
+    } else {
+        T4CLoginSessionGetChestList(&chest);
+        if (chest.valid) {
+            chestList_ = chest;
+        }
     }
 
     pumpChatMessages();
@@ -2318,11 +3052,8 @@ void GameWorldScreen::Update() {
         playerAnimUntil_ = now + 450;
     }
 
-    if (playerMoving_ && now > playerAnimUntil_) {
+    if (playerMoving_ && now > playerAnimUntil_ && !isPlayerScrolling()) {
         playerMoving_ = false;
-    }
-    if (!playerMoving_) {
-        playerAnimFrame_ = 0;
     }
 
     if (keys && canMove_ && !playerDead_ && held != 0) {
@@ -2346,8 +3077,83 @@ void GameWorldScreen::drawHudText(SDL_Renderer *renderer, const char *text, cons
     if (!renderer || !text) {
         return;
     }
-    SDL_SetRenderDrawColor(renderer, 220, 220, 200, 255);
+    const SDL_Color color{220, 220, 200, 255};
+    if (uiFont_ && uiFont_->isReady()) {
+        uiFont_->drawText(renderer, text, x, y, color);
+        return;
+    }
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
     SDL_RenderDebugText(renderer, x, y, text);
+}
+
+void GameWorldScreen::drawWrappedHudText(SDL_Renderer *renderer, const char *text, const float x,
+                                         const float y, const float maxWidth, const float lineHeight,
+                                         const int maxLines) const {
+    if (!renderer || !text || maxWidth <= 0.f || lineHeight <= 0.f || maxLines <= 0) {
+        return;
+    }
+    const SDL_Color color{220, 220, 200, 255};
+    std::string line;
+    float cursorX = x;
+    float cursorY = y;
+    int lines = 0;
+
+    const auto flushLine = [&]() {
+        if (line.empty()) {
+            return;
+        }
+        if (uiFont_ && uiFont_->isReady()) {
+            uiFont_->drawText(renderer, line.c_str(), cursorX, cursorY, color);
+        } else {
+            SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+            SDL_RenderDebugText(renderer, cursorX, cursorY, line.c_str());
+        }
+        line.clear();
+        cursorY += lineHeight;
+        ++lines;
+    };
+
+    const auto lineWidth = [&](const std::string &value) -> float {
+        if (uiFont_ && uiFont_->isReady()) {
+            int w = 0;
+            int h = 0;
+            uiFont_->measureText(value.c_str(), &w, &h);
+            return static_cast<float>(w);
+        }
+        return static_cast<float>(value.size()) * 8.f;
+    };
+
+    for (const unsigned char uch : std::string(text)) {
+        const char ch = static_cast<char>(uch);
+        if (ch == '\r') {
+            continue;
+        }
+        if (ch == '\n') {
+            flushLine();
+            if (lines >= maxLines) {
+                break;
+            }
+            continue;
+        }
+        if (ch == ' ' && line.empty()) {
+            continue;
+        }
+        const std::string trial = line + ch;
+        if (!line.empty() && lineWidth(trial) > maxWidth) {
+            flushLine();
+            if (lines >= maxLines) {
+                break;
+            }
+            if (ch != ' ') {
+                line = ch;
+            }
+        } else {
+            line = trial;
+        }
+    }
+    if (lines < maxLines && !line.empty()) {
+        flushLine();
+    }
 }
 
 void GameWorldScreen::drawFilledCircle(SDL_Renderer *renderer, const float cx, const float cy,
@@ -2409,14 +3215,41 @@ void GameWorldScreen::updatePlayerScroll() {
     T4CPlayerScrollStep(&st, kT4CPlayerScrollSteps);
     playerDisplayX_ = st.displayX;
     playerDisplayY_ = st.displayY;
-    if (playerMoving_ && (playerDisplayX_ != prevX || playerDisplayY_ != prevY)) {
-        playerAnimFrame_ = T4CWalkAnimNextFrame(playerAnimFrame_);
+    /* Windows : g_DONE=8 pas scroll, 1 avance SpriteNumber/frame rendu (nbSprite4Move=1). */
+    if (isPlayerWalkAnimActive() && (playerDisplayX_ != prevX || playerDisplayY_ != prevY)) {
+        playerAnimFrame_ = T4CWalkAnimNextPuppetFrame(playerAnimFrame_);
     }
 }
 
+bool GameWorldScreen::isPlayerWalkAnimActive() const {
+    return playerMoving_ || isPlayerScrolling();
+}
+
 void GameWorldScreen::updateRemoteUnitMotion(const Uint32 now) {
+    std::vector<std::int32_t> expiredCorpses;
     for (auto &entry : remoteUnits_) {
         RemoteUnitVisual &unit = entry.second;
+        if (unit.dying) {
+            const Uint32 elapsed = now - unit.dieStartedAt;
+            if (!unit.showCorpse) {
+                if (elapsed >= static_cast<Uint32>(kT4CDyingPhaseMs)) {
+                    unit.showCorpse = true;
+                    unit.corpseFrame = 0;
+                    unit.corpseAnimTick = now;
+                }
+            } else {
+                if (now - unit.corpseAnimTick >= static_cast<Uint32>(kT4CCorpseAnimTickMs)) {
+                    if (unit.corpseFrame < kT4CCorpseAnimMaxFrames - 1) {
+                        unit.corpseFrame++;
+                    }
+                    unit.corpseAnimTick = now;
+                }
+                if (elapsed >= static_cast<Uint32>(kT4CDyingPhaseMs + kT4CCorpseLifetimeMs)) {
+                    expiredCorpses.push_back(entry.first);
+                }
+            }
+            continue;
+        }
         if (unit.attacking) {
             if (now >= unit.attackUntil) {
                 unit.attacking = false;
@@ -2437,6 +3270,10 @@ void GameWorldScreen::updateRemoteUnitMotion(const Uint32 now) {
             unit.displayY = targetY;
             unit.moving = false;
             unit.animFrame = 0;
+            if (now - unit.animTick >= static_cast<Uint32>(kT4CIdleAnimTickMs)) {
+                unit.idleAnimFrame = T4CWalkAnimNextIdleFrame(unit.idleAnimFrame);
+                unit.animTick = now;
+            }
             continue;
         }
         unit.moving = true;
@@ -2444,9 +3281,19 @@ void GameWorldScreen::updateRemoteUnitMotion(const Uint32 now) {
         const float step = std::min(dist, 0.18f);
         unit.displayX += dx / dist * step;
         unit.displayY += dy / dist * step;
-        if (now - unit.animTick >= 90) {
-            unit.animFrame = T4CWalkAnimNextFrame(unit.animFrame);
+        if (now - unit.animTick >= static_cast<Uint32>(kT4CWalkAnimTickMs)) {
+            unit.animFrame = T4CWalkAnimNextNpcFrame(unit.animFrame);
             unit.animTick = now;
+        }
+    }
+    for (const std::int32_t unitId : expiredCorpses) {
+        remoteUnits_.erase(unitId);
+        T4CLoginSessionFinalizeRemoteUnitDeath(unitId);
+        if (selectedUnitId_ == unitId) {
+            selectedUnitId_ = 0;
+        }
+        if (hoveredUnitId_ == unitId) {
+            hoveredUnitId_ = 0;
         }
     }
 }
@@ -2483,7 +3330,7 @@ float GameWorldScreen::worldToScreenY(const float worldX, const float worldY) co
 
 bool GameWorldScreen::drawUnitSprite(SDL_Renderer *renderer, const float screenX, const float screenY,
                                      const std::int32_t unitId, const std::uint16_t appearance, const int direction,
-                                     const int animFrame, const bool attacking) const {
+                                     const int animFrame, const bool attacking, const bool idleStanding) const {
     if (!spritesLoaded_ || !renderer || appearance == 0) {
         return false;
     }
@@ -2491,19 +3338,20 @@ bool GameWorldScreen::drawUnitSprite(SDL_Renderer *renderer, const float screenX
     if (T4CIsPuppetAppearance(appearance)) {
         T4CPuppetDress dress{};
         if (!T4CLoginSessionGetRemotePuppetDress(unitId, &dress)) {
-            /* Puppet PNJ (Mithrand/Nobleman…) : fallback WHITEROBE → sprite Cleric si opcode 70 pas encore recu. */
-            dress.body = 425;
-            dress.legs = 284;
-            dress.feet = 285;
-            dress.known = true;
+            /* Windows (VisualObjectList.cpp:15734) : un puppet joueur dont l'equipement
+               (RQ_PuppetInformation/68) n'est pas recu (KnownPuppet==false) n'est PAS dessine.
+               On ne dessine donc PAS de "PNJ robe blanche" : invisible jusqu'a habillage. */
+            return false;
         }
         const bool female = appearance == 10012 || appearance == 15012;
-        if (T4CPuppetTryDraw(spriteAtlas_, renderer, dress, female, direction, animFrame, screenX, screenY,
+        /* Puppet a l'arret : pas de cycle idle (cf. joueur) — frame statique 0. */
+        const int puppetFrame = (idleStanding && !attacking) ? 0 : animFrame;
+        if (T4CPuppetTryDraw(spriteAtlas_, renderer, dress, female, direction, puppetFrame, screenX, screenY,
                              attacking)) {
             return true;
         }
         if (tryDrawNpcBase(spriteAtlas_, renderer, T4CPuppetFallbackSpriteName(dress, female), screenX, screenY,
-                           direction, animFrame, attacking)) {
+                           direction, puppetFrame, attacking, idleStanding)) {
             return true;
         }
     }
@@ -2518,7 +3366,8 @@ bool GameWorldScreen::drawUnitSprite(SDL_Renderer *renderer, const float screenX
     }
 
     if (!T4CIsPuppetAppearance(appearance) && appearance >= 10001 && appearance <= 15004) {
-        const std::string standing = T4CPlayerUnitSpriteName(probe, direction, animFrame);
+        const int standingFrame = (idleStanding && !attacking) ? 0 : animFrame;
+        const std::string standing = T4CPlayerUnitSpriteName(probe, direction, standingFrame);
         if (!standing.empty()) {
             const T4CUnitSpriteView view = T4CUnitSpriteViewFromDirection(direction);
             if (spriteAtlas_.TryDrawSpriteByName(renderer, standing, screenX, screenY, view.mirror)) {
@@ -2528,10 +3377,12 @@ bool GameWorldScreen::drawUnitSprite(SDL_Renderer *renderer, const float screenX
     }
 
     const char *npcBase = T4CRemoteUnitSpriteName(unitId, appearance);
-    if (tryDrawNpcBase(spriteAtlas_, renderer, npcBase, screenX, screenY, direction, animFrame, attacking)) {
+    if (tryDrawNpcBase(spriteAtlas_, renderer, npcBase, screenX, screenY, direction, animFrame, attacking,
+                       idleStanding)) {
         return true;
     }
 
+    LogUnitDrawFailOnce(unitId, appearance, npcBase != nullptr ? "decode/echec sprite" : "appearance inconnue");
     return false;
 }
 
@@ -2546,8 +3397,14 @@ bool GameWorldScreen::drawPlayerSprite(SDL_Renderer *renderer, const float scree
         return false;
     }
 
-    const int frame = playerAttacking_ ? playerAttackFrame_ : (playerMoving_ ? playerAnimFrame_ : 0);
-    if (T4CPuppetTryDrawPlayer(spriteAtlas_, renderer, active, playerDirection_, frame, screenX, screenY,
+    const int frame =
+        playerAttacking_ ? playerAttackFrame_ : (isPlayerWalkAnimActive() ? playerAnimFrame_ : playerIdleAnimFrame_);
+    /* Windows : un puppet joueur n'a PAS de cycle idle — a l'arret SpriteNumber reste a 1
+       (pose statique). Le rendu puppet indexe le cycle de MARCHE avec frameIndex, donc lui
+       passer une frame idle qui defile ferait "marcher sur place". On force donc frame 0
+       statique a l'arret pour le puppet (l'anim idle StMov ne vaut que pour les sprites NPC). */
+    const int puppetFrame = playerAttacking_ ? frame : (isPlayerWalkAnimActive() ? playerAnimFrame_ : 0);
+    if (T4CPuppetTryDrawPlayer(spriteAtlas_, renderer, active, playerDirection_, puppetFrame, screenX, screenY,
                                playerAttacking_)) {
         return true;
     }
@@ -2555,14 +3412,15 @@ bool GameWorldScreen::drawPlayerSprite(SDL_Renderer *renderer, const float scree
     const T4CUnitSpriteView view = T4CUnitSpriteViewFromDirection(playerDirection_);
     if (playerAttacking_) {
         const char *base = T4CPlayerSpriteNpcName(active);
-        const std::string attackName = T4CUnitAttackSpriteFrameName(base, view, frame);
+        const std::string attackName = T4CUnitAttackSpriteFrameName(base, view, playerAttackFrame_);
         if (!attackName.empty() &&
             spriteAtlas_.TryDrawSpriteByName(renderer, attackName, screenX, screenY, view.mirror)) {
             return true;
         }
     }
-
-    const std::string spriteName = T4CPlayerUnitSpriteName(active, playerDirection_, playerAttacking_ ? 0 : frame);
+    const int drawFrame =
+        playerAttacking_ ? playerAttackFrame_ : (isPlayerWalkAnimActive() ? playerAnimFrame_ : 0);
+    const std::string spriteName = T4CPlayerUnitSpriteName(active, playerDirection_, drawFrame);
     if (spriteName.empty()) {
         return false;
     }
@@ -2629,30 +3487,44 @@ void GameWorldScreen::Render(SDL_Renderer *renderer, LauncherChrome *chrome) {
     for (const auto &entry : remoteUnits_) {
         const float sx = worldToScreenX(entry.second.displayX, entry.second.displayY);
         const float sy = worldToScreenY(entry.second.displayX, entry.second.displayY);
-        const std::uint16_t appearance = entry.second.appearance;
-        if (entry.first == hoveredUnitId_ && entry.first != selectedUnitId_) {
-            drawUnitOutline(renderer, sx, sy, entry.first, appearance);
-        }
+        const std::uint16_t appearance =
+            entry.second.showCorpse ? entry.second.liveAppearance : entry.second.appearance;
         if (entry.first == selectedUnitId_) {
             selectionVisible = true;
             selSx = sx;
             selSy = sy;
             selAppearance = appearance;
         }
-        const int frame = entry.second.attacking
-                              ? entry.second.attackAnimFrame
-                              : (entry.second.moving ? entry.second.animFrame : 0);
-        if (!drawUnitSprite(renderer, sx, sy, entry.first, appearance, entry.second.direction, frame,
-                            entry.second.attacking)) {
-            SDL_FRect dot{sx - 4.f, sy - 4.f, 8.f, 8.f};
-            SDL_RenderFillRect(renderer, &dot);
+        bool drew = false;
+        if (entry.second.showCorpse) {
+            const char *base = T4CSpriteNameFromAppearance(entry.second.liveAppearance);
+            drew = tryDrawCorpse(spriteAtlas_, renderer, base, sx, sy, entry.second.corpseFrame);
+        } else {
+            const int frame = entry.second.attacking
+                                  ? entry.second.attackAnimFrame
+                                  : (entry.second.moving ? entry.second.animFrame : entry.second.idleAnimFrame);
+            const bool idleStanding = !entry.second.moving && !entry.second.attacking;
+            drew = drawUnitSprite(renderer, sx, sy, entry.first, appearance, entry.second.direction, frame,
+                                  entry.second.attacking, idleStanding);
+        }
+        if (!drew && !entry.second.showCorpse && !entry.second.dying) {
+            /* Pas de point pour un puppet sans equipement (invisible facon Windows). */
+            T4CPuppetDress probeDress{};
+            const bool undressedPuppet =
+                T4CIsPuppetAppearance(appearance) &&
+                !T4CLoginSessionGetRemotePuppetDress(entry.first, &probeDress);
+            if (!undressedPuppet) {
+                SDL_FRect dot{sx - 4.f, sy - 4.f, 8.f, 8.f};
+                SDL_RenderFillRect(renderer, &dot);
+            }
         }
     }
 
     // Encadre + libelle de l'unite selectionnee (V3_TargetDlg simplifie).
     if (selectionVisible) {
-        drawUnitOutline(renderer, selSx, selSy, selectedUnitId_, selAppearance);
-        if (const auto selIt = remoteUnits_.find(selectedUnitId_); selIt != remoteUnits_.end()) {
+        if (const auto selIt = remoteUnits_.find(selectedUnitId_);
+            selIt != remoteUnits_.end() && isRemoteUnitSelectable(selIt->second, selectedUnitId_)) {
+            drawUnitOutline(renderer, selSx, selSy, selectedUnitId_, selAppearance);
             drawTargetHpBar(renderer, selSx, selSy, static_cast<int>(selIt->second.hpPercent));
         }
         SDL_FRect labelBg{selSx - 48.f, selSy - 82.f, 96.f, 18.f};
@@ -2791,41 +3663,44 @@ void GameWorldScreen::Render(SDL_Renderer *renderer, LauncherChrome *chrome) {
 
     renderDialoguePanel(renderer);
     renderShopPanel(renderer);
+    renderChestPanel(renderer);
     renderChatLog(renderer);
     renderInventoryPanel(renderer);
     renderGameMenu(renderer);
     renderReturnConfirm(renderer);
 
     if (mouseValid_ && spritesLoaded_) {
-        if (leftMouseHeld_ && holdMoveDirection_ >= 1 && holdMoveDirection_ <= 8) {
+        if (isUiPanelBlockingWorldCursor()) {
+            /* Inventaire / coffre / boutique : gant fixe decale a droite de la cible (GameUI Windows). */
+            spriteAtlas_.TryDrawSpriteByName(renderer, "glove0000", mouseX_ + 24.f, mouseY_);
+        } else if (leftMouseHeld_ && holdMoveDirection_ >= 1 && holdMoveDirection_ <= 8) {
             if (const char *cursor = kHoldMoveCursorSprite(holdMoveDirection_); cursor != nullptr) {
                 spriteAtlas_.TryDrawSpriteByName(renderer, cursor, mouseX_, mouseY_);
             }
         } else {
-            /* Curseur contextuel Windows : gant par defaut, epee animee (oscillante) sur un
-             * ennemi, curseur parole sur un PNJ amical (main2.cpp FirstInitObject). */
             bool overEnemy = false;
             bool overNpc = false;
             if (hoveredUnitId_ != 0) {
                 const auto hovIt = remoteUnits_.find(hoveredUnitId_);
                 if (hovIt != remoteUnits_.end()) {
                     const std::uint16_t app = hovIt->second.appearance;
+                    const char friendStatus = hovIt->second.friendStatus;
                     T4CActivePlayer me{};
                     T4CLoginSessionGetActivePlayer(&me);
                     const bool isSelf = me.valid && me.unitId != 0 && hoveredUnitId_ == me.unitId;
                     const bool isCorpse = app >= 15001 && app <= 15012;
-                    const bool isMonster = app >= 20000 && app <= 24999;
                     if (!isSelf && !isCorpse) {
-                        if (isMonster || attackMode_) {
+                        if (attackMode_) {
                             overEnemy = true;
-                        } else if (isNpcUnit(hoveredUnitId_, app)) {
+                        } else if (isNpcUnit(hoveredUnitId_, app, friendStatus)) {
                             overNpc = true;
+                        } else if (isMonsterUnit(hoveredUnitId_, app, friendStatus)) {
+                            overEnemy = true;
                         }
                     }
                 }
             }
             if (overEnemy) {
-                /* 12 frames sword0000..sword0022 (pas de 2) — V3MouseCursor2 Windows. */
                 const int frame = static_cast<int>((SDL_GetTicks() / 90u) % 12u) * 2;
                 char swordName[16];
                 std::snprintf(swordName, sizeof(swordName), "sword%04d", frame);
@@ -2836,8 +3711,17 @@ void GameWorldScreen::Render(SDL_Renderer *renderer, LauncherChrome *chrome) {
                 if (!spriteAtlas_.TryDrawSpriteByName(renderer, "V3_TalkCursor", mouseX_, mouseY_)) {
                     spriteAtlas_.TryDrawSpriteByName(renderer, "glove0000", mouseX_, mouseY_);
                 }
-            } else if (!spriteAtlas_.TryDrawSpriteByName(renderer, "glove0000", mouseX_, mouseY_)) {
-                spriteAtlas_.TryDrawSpriteByName(renderer, "StaticAttackCursor", mouseX_, mouseY_);
+            } else if (hoveredGroundId_ != 0) {
+                const auto gIt = groundObjects_.find(hoveredGroundId_);
+                const std::uint16_t gApp =
+                    gIt != groundObjects_.end() ? gIt->second.appearance : static_cast<std::uint16_t>(0);
+                if (isAnimatedGloveGroundObject(gApp)) {
+                    tryDrawAnimatedGloveCursor(spriteAtlas_, renderer, mouseX_, mouseY_);
+                } else {
+                    spriteAtlas_.TryDrawSpriteByName(renderer, "glove0000", mouseX_, mouseY_);
+                }
+            } else {
+                spriteAtlas_.TryDrawSpriteByName(renderer, "glove0000", mouseX_, mouseY_);
             }
         }
     }

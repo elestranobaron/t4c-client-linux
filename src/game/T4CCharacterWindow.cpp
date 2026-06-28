@@ -1,6 +1,7 @@
 #include "game/T4CCharacterWindow.h"
 
 #include "game/T4CGroundObjectSprites.h"
+#include "game/T4CInvItemSprites.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -52,7 +53,7 @@ void textRight(const T4CUiFont *f, SDL_Renderer *r, const char *s, float xRight,
 // Dessine l'icône d'un objet (sprite monde de l'objgroup) centrée dans une cellule.
 void drawItemIcon(SDL_Renderer *r, const T4CV2SpriteAtlas &atlas, std::uint16_t appearance, float cx,
                   float cy) {
-    if (const char *sprite = T4CGroundObjectSpriteName(appearance); sprite != nullptr) {
+    if (const char *sprite = T4CInvItemSpriteName(appearance); sprite != nullptr) {
         if (atlas.TryDrawSpriteByName(r, sprite, cx, cy)) {
             return;
         }
@@ -157,7 +158,7 @@ void T4CCharacterWindow::render(SDL_Renderer *renderer, const T4CV2SpriteAtlas &
                                 const T4CActivePlayer &player, const T4CPlayerStatus &status,
                                 const T4CPlayerEquipment &equipment, const T4CPlayerBackpack &backpack,
                                 const T4CPlayerSkillBook &skills, const T4CPlayerSpellBook &spells,
-                                const int selectedBag) const {
+                                const int selectedBag, const InvDragView drag) const {
     if (!renderer) {
         return;
     }
@@ -216,7 +217,8 @@ void T4CCharacterWindow::render(SDL_Renderer *renderer, const T4CV2SpriteAtlas &
             renderStats(renderer, atlas, font, ox, oy, player, status, skills);
             break;
         case Tab::Inventory:
-            renderInventory(renderer, atlas, font, ox, oy, player, status, equipment, backpack, selectedBag);
+            renderInventory(renderer, atlas, font, ox, oy, player, status, equipment, backpack, selectedBag,
+                            drag);
             break;
         case Tab::Spells:
             renderSpells(renderer, atlas, font, ox, oy, spells);
@@ -281,17 +283,22 @@ void T4CCharacterWindow::renderInventory(SDL_Renderer *renderer, const T4CV2Spri
                                          const T4CUiFont *font, const float ox, const float oy,
                                          const T4CActivePlayer & /*player*/, const T4CPlayerStatus &status,
                                          const T4CPlayerEquipment &equipment,
-                                         const T4CPlayerBackpack &backpack, const int selectedBag) const {
-    // Emplacements d'équipement (paperdoll) — rects V3_InvDlg. Clic = déséquiper.
+                                         const T4CPlayerBackpack &backpack, const int selectedBag,
+                                         const InvDragView drag) const {
+    // Emplacements d'équipement (paperdoll) — rects V3_InvDlg. Drag depuis slot = masquer source.
     for (const SlotDef &s : kEquipSlots) {
         fillRect(renderer, ox + s.x, oy + s.y, s.w, s.h, {28, 26, 34, 220});
         frameRect(renderer, ox + s.x, oy + s.y, s.w, s.h, {80, 74, 56, 255});
         text(font, renderer, s.label, ox + s.x + 2.f, oy + s.y + 1.f, kDim);
-        for (const T4CEquippedItem &it : equipment.items) {
-            if (it.slot == s.slot && it.appearance != 0) {
-                drawItemIcon(renderer, atlas, it.appearance, ox + s.x + s.w * 0.5f - 16.f,
-                             oy + s.y + s.h * 0.5f - 16.f);
-                break;
+        const bool hideEquip =
+            drag.active && drag.fromEquip && drag.equipSlot == s.slot;
+        if (!hideEquip) {
+            for (const T4CEquippedItem &it : equipment.items) {
+                if (it.slot == s.slot && it.appearance != 0) {
+                    drawItemIcon(renderer, atlas, it.appearance, ox + s.x + s.w * 0.5f - 16.f,
+                                 oy + s.y + s.h * 0.5f - 16.f);
+                    break;
+                }
             }
         }
     }
@@ -311,7 +318,8 @@ void T4CCharacterWindow::renderInventory(SDL_Renderer *renderer, const T4CV2Spri
                  selected ? SDL_Color{66, 58, 30, 240} : SDL_Color{30, 28, 22, 220});
         frameRect(renderer, cx, cy, kBagCell, kBagCell,
                   selected ? SDL_Color{255, 214, 90, 255} : SDL_Color{70, 64, 50, 255});
-        if (backpack.valid && static_cast<size_t>(i) < backpack.items.size()) {
+        const bool hideBag = drag.active && !drag.fromEquip && drag.bagIndex == i;
+        if (backpack.valid && static_cast<size_t>(i) < backpack.items.size() && !hideBag) {
             const T4CBagItem &item = backpack.items[i];
             drawItemIcon(renderer, atlas, item.appearance, cx - 3.f, cy - 3.f);
             if (item.qty > 1) {
@@ -322,12 +330,26 @@ void T4CCharacterWindow::renderInventory(SDL_Renderer *renderer, const T4CV2Spri
         }
     }
 
-    // Objet selectionne : nom + boutons d'action (equip/use/drop/junk → opcodes 21/23/12/85).
-    if (selectedBag >= 0 && backpack.valid && static_cast<size_t>(selectedBag) < backpack.items.size()) {
-        const T4CBagItem &item = backpack.items[static_cast<size_t>(selectedBag)];
-        char label[160];
-        std::snprintf(label, sizeof(label), "%s%s", item.name.empty() ? "Objet" : item.name.c_str(),
-                      item.charges > 0 ? " *" : "");
+    // Objet tenu (drag sac ou equipe) : nom + boutons d'action (equip/use/drop/junk).
+    const bool showBagActions =
+        selectedBag >= 0 && backpack.valid && static_cast<size_t>(selectedBag) < backpack.items.size();
+    const bool showEquipActions = drag.active && drag.fromEquip;
+    if (showBagActions || showEquipActions) {
+        char label[160] = "Objet";
+        if (showBagActions) {
+            const T4CBagItem &item = backpack.items[static_cast<size_t>(selectedBag)];
+            std::snprintf(label, sizeof(label), "%s%s", item.name.empty() ? "Objet" : item.name.c_str(),
+                          item.charges > 0 ? " *" : "");
+        } else {
+            for (const T4CEquippedItem &it : equipment.items) {
+                if (it.slot == drag.equipSlot) {
+                    std::snprintf(label, sizeof(label), "%s%s",
+                                  it.name.empty() ? "Objet equipe" : it.name.c_str(),
+                                  it.charges > 0 ? " *" : "");
+                    break;
+                }
+            }
+        }
         text(font, renderer, label, ox + kBagX, oy + kActionBtnY - 18.f, kGold);
         for (const ActionBtnDef &btn : kBagActions) {
             fillRect(renderer, ox + btn.x, oy + kActionBtnY, btn.w, kActionBtnH, {52, 46, 34, 240});
@@ -381,11 +403,12 @@ void T4CCharacterWindow::renderSpells(SDL_Renderer *renderer, const T4CV2SpriteA
     }
 }
 
-T4CCharacterWindow::ClickResult T4CCharacterWindow::handleClick(
+T4CCharacterWindow::HitTestResult T4CCharacterWindow::hitTest(
     const int screenW, const int screenH, const float mx, const float my, const Tab current,
     const T4CPlayerEquipment &equipment, const T4CPlayerBackpack &backpack,
-    const T4CPlayerSkillBook &skills, const T4CPlayerSpellBook &spells, const int selectedBag) const {
-    ClickResult res{};
+    const T4CPlayerSkillBook &skills, const T4CPlayerSpellBook &spells, const int selectedBag,
+    const InvDragView drag) const {
+    HitTestResult res{};
     const SDL_FPoint o = origin(screenW, screenH);
     const float ox = o.x;
     const float oy = o.y;
@@ -394,14 +417,14 @@ T4CCharacterWindow::ClickResult T4CCharacterWindow::handleClick(
         return px >= x && px <= x + w && py >= y && py <= y + h;
     };
 
-    // En dehors de la fenêtre : clic non consommé.
     if (!inRect(mx, my, ox, oy, static_cast<float>(kW), static_cast<float>(kH))) {
+        res.kind = HitKind::Outside;
         return res;
     }
-    res.consumed = true;
+    res.kind = HitKind::Inside;
 
     if (inRect(mx, my, ox + 554.f, oy + 27.f, 27.f, 24.f)) {
-        res.close = true;
+        res.kind = HitKind::Close;
         return res;
     }
 
@@ -417,27 +440,27 @@ T4CCharacterWindow::ClickResult T4CCharacterWindow::handleClick(
     };
     for (const TabHit &t : tabs) {
         if (inRect(mx, my, ox + t.x, oy + 63.f, t.w, 20.f)) {
-            if (t.tab != current) {
-                res.tabChanged = true;
-                res.tab = t.tab;
-            }
+            res.kind = HitKind::Tab;
+            res.tab = t.tab;
             return res;
         }
     }
 
     if (current == Tab::Inventory) {
-        // Boutons d'action sur l'objet selectionne.
-        if (selectedBag >= 0 && backpack.valid &&
-            static_cast<size_t>(selectedBag) < backpack.items.size()) {
+        const bool actionTarget =
+            (selectedBag >= 0 && backpack.valid &&
+             static_cast<size_t>(selectedBag) < backpack.items.size()) ||
+            (drag.active && drag.fromEquip);
+        if (actionTarget) {
             for (const ActionBtnDef &btn : kBagActions) {
                 if (inRect(mx, my, ox + btn.x, oy + kActionBtnY, btn.w, kActionBtnH)) {
+                    res.kind = HitKind::ActionButton;
                     res.action = btn.action;
                     res.index = selectedBag;
                     return res;
                 }
             }
         }
-        // Grille du sac.
         const float gx = ox + kBagX;
         const float gy = oy + kBagY;
         for (int i = 0; i < kBagMaxSlots; ++i) {
@@ -446,33 +469,32 @@ T4CCharacterWindow::ClickResult T4CCharacterWindow::handleClick(
             const float cx = gx + static_cast<float>(col) * (kBagCell + kBagGap);
             const float cy = gy + static_cast<float>(row) * (kBagCell + kBagGap);
             if (inRect(mx, my, cx, cy, kBagCell, kBagCell)) {
-                if (backpack.valid && static_cast<size_t>(i) < backpack.items.size()) {
-                    res.action = Action::SelectBagItem;
-                    res.index = i;
-                }
+                res.kind = HitKind::BagCell;
+                res.index = i;
+                res.hasItem =
+                    backpack.valid && static_cast<size_t>(i) < backpack.items.size();
                 return res;
             }
         }
-        // Paperdoll : clic sur un slot equipe = desequiper.
         for (const SlotDef &s : kEquipSlots) {
             if (inRect(mx, my, ox + s.x, oy + s.y, s.w, s.h)) {
+                res.kind = HitKind::EquipSlot;
+                res.slot = s.slot;
                 for (const T4CEquippedItem &it : equipment.items) {
                     if (it.slot == s.slot && it.appearance != 0) {
-                        res.action = Action::UnequipSlot;
-                        res.slot = s.slot;
-                        return res;
+                        res.hasItem = true;
+                        break;
                     }
                 }
                 return res;
             }
         }
     } else if (current == Tab::Stats) {
-        // Liste competences : clic = utiliser (mediter, etc.).
         const int shown = std::min<int>(kSkillMaxShown, static_cast<int>(skills.skills.size()));
         for (int i = 0; i < shown; ++i) {
             const float ly = oy + kSkillListY + static_cast<float>(i) * kSkillLineH;
             if (inRect(mx, my, ox + kSkillListX, ly, 524.f, kSkillLineH)) {
-                res.action = Action::UseSkill;
+                res.kind = HitKind::Skill;
                 res.index = i;
                 return res;
             }
@@ -485,7 +507,7 @@ T4CCharacterWindow::ClickResult T4CCharacterWindow::handleClick(
             const float rx = ox + spellSlotX(col);
             const float ry = oy + kSpellListY + static_cast<float>(row) * kSpellRowStep;
             if (inRect(mx, my, rx, ry, kSpellSlotW, kSpellSlotH)) {
-                res.action = Action::CastSpell;
+                res.kind = HitKind::Spell;
                 res.index = i;
                 return res;
             }

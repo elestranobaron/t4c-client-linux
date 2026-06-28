@@ -32,10 +32,25 @@ class T4CGameHud {
 
     void shutdown();
 
+    /** Macros objet par defaut (V3_InvDlg::SetDefaultMacro — F2/F3/F4). */
+    struct DefaultItemMacro {
+        int slot;
+        std::uint16_t baseId;
+        const char *iconSprite;
+    };
+    static constexpr DefaultItemMacro kDefaultItemMacros[] = {
+        {1, 40623, "64kInvPotion 2"},
+        {2, 40004, "64kInvPotion 1"},
+        {3, 40015, "64kInvTorch"},
+    };
+    static constexpr int kDefaultItemMacroCount = 3;
+
     /** Zones cliquables MainBar (V3_MainBarDlg Home/Exit + 12 slots macro). */
     static SDL_FRect homeButtonRect(int screenW, int screenH);
     static SDL_FRect exitButtonRect(int screenW, int screenH);
     static SDL_FRect macroSlotRect(int screenW, int screenH, int slot);
+    /** Zone saisie chat (m_EditInput 110,19)-(510,36) relative MainBar. */
+    static SDL_FRect chatInputRect(int screenW, int screenH);
 
    private:
     static void drawBar(SDL_Renderer *renderer, const T4CV2SpriteAtlas &atlas, const char *spriteName,

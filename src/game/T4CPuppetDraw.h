@@ -24,6 +24,12 @@ struct T4CPuppetDress {
 struct T4CActivePlayer;
 
 /** Dessine un puppet 3D (19 calques, BodyOrderR) — tables generees depuis Puppet.cpp. */
+/** Contour FX_OUTLINE sur les 19 calques puppet (meme BodyOrderR que le corps). */
+bool T4CPuppetTryDrawOutline(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, const T4CPuppetDress &dress,
+                             const bool female, const int direction, const int frameIndex, const float screenX,
+                             const float screenY, const bool attacking, const std::uint8_t r, const std::uint8_t g,
+                             const std::uint8_t b);
+
 bool T4CPuppetTryDraw(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, const T4CPuppetDress &dress,
                       bool female, int direction, int frameIndex, float screenX, float screenY,
                       bool attacking = false);

@@ -40,6 +40,12 @@ SDL_FRect T4CGameHud::macroSlotRect(const int screenW, const int screenH, const 
     return SDL_FRect{ox + 134.f + static_cast<float>(slot) * 36.f, oy + 40.f, 34.f, 32.f};
 }
 
+SDL_FRect T4CGameHud::chatInputRect(const int screenW, const int screenH) {
+    const float ox = static_cast<float>((screenW - kMainBarW) / 2);
+    const float oy = static_cast<float>(screenH - kMainBarH);
+    return SDL_FRect{ox + 110.f, oy + 19.f, 400.f, 17.f};
+}
+
 void T4CGameHud::shutdown() {
     if (radarTexture_) {
         SDL_DestroyTexture(radarTexture_);
@@ -53,7 +59,10 @@ void T4CGameHud::preloadSprites(T4CV2SpriteAtlas *atlas) const {
     if (!atlas) {
         return;
     }
-    const std::vector<std::string> names = {kLifeBack, kHpBar, kMpBar, kMainBack, kXpBar, kTmiBack, kPlayerPos};
+    const std::vector<std::string> names = {
+        kLifeBack, kHpBar, kMpBar, kMainBack, kXpBar, kTmiBack, kPlayerPos,
+        kDefaultItemMacros[0].iconSprite, kDefaultItemMacros[1].iconSprite, kDefaultItemMacros[2].iconSprite,
+    };
     atlas->PreloadBanksForNames(names);
 }
 
@@ -140,6 +149,11 @@ void T4CGameHud::renderLife(SDL_Renderer *renderer, const T4CV2SpriteAtlas &atla
                       static_cast<unsigned>(maxMana));
         drawText(font, renderer, nums, ox + 60.f, oy + 47.f, white);
     }
+
+    if (T4CLoginSessionGetAttackMode()) {
+        drawFrameOrFill(renderer, atlas, "StaticAttackCursor", ox + 162.f, oy + 54.f, 14.f, 19.f,
+                        {80, 20, 20, 255});
+    }
 }
 
 void T4CGameHud::renderMainBar(SDL_Renderer *renderer, const T4CV2SpriteAtlas &atlas, const T4CUiFont *font,
@@ -182,6 +196,17 @@ void T4CGameHud::renderMainBar(SDL_Renderer *renderer, const T4CV2SpriteAtlas &a
         SDL_RenderFillRect(renderer, &cell);
         SDL_SetRenderDrawColor(renderer, 80, 72, 56, 255);
         SDL_RenderRect(renderer, &cell);
+        for (int m = 0; m < kDefaultItemMacroCount; ++m) {
+            if (kDefaultItemMacros[m].slot != col) {
+                continue;
+            }
+            const float iconX = sx + 17.f;
+            const float iconY = oy + 56.f;
+            if (!atlas.TryDrawSpriteByName(renderer, kDefaultItemMacros[m].iconSprite, iconX, iconY)) {
+                drawText(font, renderer, "?", sx + 12.f, oy + 48.f, {255, 255, 255, 255});
+            }
+            break;
+        }
     }
 }
 

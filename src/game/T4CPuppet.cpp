@@ -57,7 +57,7 @@ const char *resolveSprite(const T4CPuppetInfo &info, const T4CPupSlot slot, cons
 
 bool drawLayer(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, const char *base, const int direction,
                const int frameIndex, const float screenX, const float screenY, const int paletteVariant,
-               const bool attacking) {
+               const bool attacking, const bool omitShadow) {
     if (!base || base[0] == '\0') {
         return false;
     }
@@ -66,15 +66,27 @@ bool drawLayer(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, const char
         /* Pose d'attaque puppet : « PupChainMailBodyA045-a » etc. Repli sur la pose debout. */
         const std::string attFrame = T4CUnitAttackSpriteFrameName(base, view, frameIndex);
         if (!attFrame.empty() &&
-            atlas.TryDrawSpriteByName(renderer, attFrame, screenX, screenY, view.mirror, paletteVariant)) {
+            atlas.TryDrawSpriteByName(renderer, attFrame, screenX, screenY, view.mirror, paletteVariant,
+                                      omitShadow)) {
             return true;
         }
     }
-    const std::string frame = T4CUnitSpriteFrameName(base, view, attacking ? 0 : frameIndex);
-    if (frame.empty()) {
-        return atlas.TryDrawSpriteByName(renderer, base, screenX, screenY, view.mirror, paletteVariant);
+    const int walkFrame = attacking ? 0 : frameIndex;
+    const std::string frame =
+        T4CUnitSpriteFrameName(base, view, walkFrame, kT4CPuppetWalkAnimFrames - 1);
+    if (!frame.empty() &&
+        atlas.TryDrawSpriteByName(renderer, frame, screenX, screenY, view.mirror, paletteVariant, omitShadow)) {
+        return true;
     }
-    return atlas.TryDrawSpriteByName(renderer, frame, screenX, screenY, view.mirror, paletteVariant);
+    if (walkFrame != 0) {
+        const std::string frame0 =
+            T4CUnitSpriteFrameName(base, view, 0, kT4CPuppetWalkAnimFrames - 1);
+        if (!frame0.empty()) {
+            return atlas.TryDrawSpriteByName(renderer, frame0, screenX, screenY, view.mirror, paletteVariant,
+                                             omitShadow);
+        }
+    }
+    return false;
 }
 
 bool drawPuppetInternal(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, const T4CPuppetInfo &info,
@@ -86,8 +98,60 @@ bool drawPuppetInternal(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, c
         const auto slot = static_cast<T4CPupSlot>(kPuppetBodyOrderR[dir][layer]);
         int paletteVariant = 0;
         const char *sprite = resolveSprite(info, slot, female, &paletteVariant);
+        /* Windows : ombre NCK sur les calques pieds uniquement (BodyPartMask evite le doublon). */
+        const bool omitShadow = slot != kPupFoot && slot != kPupBoot;
         if (sprite && drawLayer(atlas, renderer, sprite, direction, frameIndex, screenX, screenY, paletteVariant,
-                                attacking)) {
+                                attacking, omitShadow)) {
+            any = true;
+        }
+    }
+    return any;
+}
+
+bool drawOutlineLayer(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, const char *base, const int direction,
+                      const int frameIndex, const float screenX, const float screenY, const int paletteVariant,
+                      const bool attacking, const std::uint8_t r, const std::uint8_t g, const std::uint8_t b) {
+    if (!base || base[0] == '\0') {
+        return false;
+    }
+    const T4CUnitSpriteView view = T4CUnitSpriteViewFromDirection(direction);
+    if (attacking) {
+        const std::string attFrame = T4CUnitAttackSpriteFrameName(base, view, frameIndex);
+        if (!attFrame.empty() &&
+            atlas.TryDrawSpriteOutline(renderer, attFrame, screenX, screenY, r, g, b, view.mirror, paletteVariant)) {
+            return true;
+        }
+    }
+    const int walkFrame = attacking ? 0 : frameIndex;
+    const std::string frame =
+        T4CUnitSpriteFrameName(base, view, walkFrame, kT4CPuppetWalkAnimFrames - 1);
+    if (!frame.empty() &&
+        atlas.TryDrawSpriteOutline(renderer, frame, screenX, screenY, r, g, b, view.mirror, paletteVariant)) {
+        return true;
+    }
+    if (walkFrame != 0) {
+        const std::string frame0 =
+            T4CUnitSpriteFrameName(base, view, 0, kT4CPuppetWalkAnimFrames - 1);
+        if (!frame0.empty()) {
+            return atlas.TryDrawSpriteOutline(renderer, frame0, screenX, screenY, r, g, b, view.mirror,
+                                              paletteVariant);
+        }
+    }
+    return false;
+}
+
+bool drawPuppetOutlineInternal(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, const T4CPuppetInfo &info,
+                               const bool female, const int direction, const int frameIndex, const float screenX,
+                               const float screenY, const bool attacking, const std::uint8_t r, const std::uint8_t g,
+                               const std::uint8_t b) {
+    const int dir = clampDirection(direction);
+    bool any = false;
+    for (int layer = 0; layer < 19; ++layer) {
+        const auto slot = static_cast<T4CPupSlot>(kPuppetBodyOrderR[dir][layer]);
+        int paletteVariant = 0;
+        const char *sprite = resolveSprite(info, slot, female, &paletteVariant);
+        if (sprite && drawOutlineLayer(atlas, renderer, sprite, direction, frameIndex, screenX, screenY,
+                                       paletteVariant, attacking, r, g, b)) {
             any = true;
         }
     }
@@ -173,7 +237,7 @@ void T4CPuppetAppendDressPreload(const T4CPuppetDress &dress, const bool female,
         if (!sprite) {
             continue;
         }
-        T4CAppendUnitSpritePreload(sprite, out);
+        T4CAppendPuppetSpritePreload(sprite, out);
     }
 }
 
@@ -187,6 +251,19 @@ const char *T4CPuppetFallbackSpriteName(const T4CPuppetDress &dress, const bool 
         }
     }
     return female ? "PaysanneModel1" : "Warrio";
+}
+
+bool T4CPuppetTryDrawOutline(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, const T4CPuppetDress &dress,
+                             const bool female, const int direction, const int frameIndex, const float screenX,
+                             const float screenY, const bool attacking, const std::uint8_t r, const std::uint8_t g,
+                             const std::uint8_t b) {
+    if (!renderer) {
+        return false;
+    }
+    T4CPuppetInfo info{};
+    T4CPuppetizeFromDress(dress, !female, &info);
+    return drawPuppetOutlineInternal(atlas, renderer, info, female, direction, frameIndex, screenX, screenY,
+                                     attacking, r, g, b);
 }
 
 bool T4CPuppetTryDraw(const T4CV2SpriteAtlas &atlas, SDL_Renderer *renderer, const T4CPuppetDress &dress,
