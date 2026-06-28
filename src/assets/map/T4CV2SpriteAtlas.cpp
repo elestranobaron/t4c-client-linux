@@ -17,6 +17,25 @@
 
 namespace {
 
+void LogSpriteIssueOnce(const char *kind, const std::string &spriteName, const char *detail = nullptr) {
+    static std::unordered_set<std::string> logged;
+    std::string key = kind;
+    key += ':';
+    key += spriteName;
+    if (detail != nullptr) {
+        key += ':';
+        key += detail;
+    }
+    if (!logged.insert(key).second) {
+        return;
+    }
+    if (detail != nullptr) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "[SpriteAtlas] %s '%s' (%s)", kind, spriteName.c_str(), detail);
+    } else {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "[SpriteAtlas] %s '%s'", kind, spriteName.c_str());
+    }
+}
+
 #pragma pack(push, 1)
 struct V2DidHeaderFile {
     char strNom[64];
@@ -49,6 +68,7 @@ struct PalInfoDisk {
 
 constexpr std::uint16_t kCompDd = 1;
 constexpr std::uint16_t kCompNck = 2;
+constexpr std::uint16_t kCompNull = 3;  /* Windows COMP_NULL : frame vide (pas d'erreur). */
 constexpr std::uint16_t kCompZip = 9;
 
 bool ReadFileBytes(const std::string &path, std::vector<std::uint8_t> &out) {
@@ -327,6 +347,7 @@ bool T4CV2SpriteAtlas::ensureBankLoaded(const std::uint32_t bankIndex) const {
     std::vector<std::uint8_t> bytes;
     if (!ReadGameFileBytes(path, bytes)) {
         ddaBankMissing_[bankIndex] = true;
+        LogSpriteIssueOnce("banque absente", path);
         return false;
     }
     if (bytes.size() > 4) {
@@ -363,7 +384,15 @@ bool T4CV2SpriteAtlas::Init(SDL_Renderer *renderer) {
     }
     hasDefaultPalette_ = true;
 
-    loadDidFile("V2DataI.did", false);
+    const std::size_t oriEntriesBefore = didEntries_.size();
+    if (!loadDidFile("V2DataI.did", false)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "[T4CV2SpriteAtlas] V2DataI.did introuvable ou invalide — sprites creatures/UI ORI "
+                    "indisponibles");
+    } else {
+        SDL_Log("[T4CV2SpriteAtlas] V2DataI.did : %zu entrees",
+                didEntries_.size() - oriEntriesBefore);
+    }
     if (!loadDidFile("v2nmsdatai.did", true)) {
         lastError_ = "Index v2nmsdatai.did introuvable";
         return false;
@@ -480,6 +509,10 @@ bool T4CV2SpriteAtlas::decodeSprite(const DidEntry &entry, DecodedSprite &out) c
     V2SpriteHeaderDisk raw{};
     std::memcpy(&raw, bank.data() + entry.fileOffset, sizeof(raw));
     const V2SpriteHeaderDisk h = DecodeHeader(raw);
+    if (h.dwCompType == kCompNull) {
+        out = {};
+        return true;
+    }
     if (h.dwWidth == 0 || h.dwHeight == 0) {
         return false;
     }
@@ -550,7 +583,8 @@ bool T4CV2SpriteAtlas::decodeSprite(const DidEntry &entry, DecodedSprite &out) c
 
 SDL_Texture *T4CV2SpriteAtlas::createTextureFromDecoded(const DecodedSprite &sprite,
                                                          const std::uint8_t *paletteRgb,
-                                                         const DecodedSprite *alphaMask) const {
+                                                         const DecodedSprite *alphaMask,
+                                                         const bool omitShadow) const {
     if (!renderer_ || !paletteRgb || sprite.indices.empty()) {
         return nullptr;
     }
@@ -581,10 +615,14 @@ SDL_Texture *T4CV2SpriteAtlas::createTextureFromDecoded(const DecodedSprite &spr
             const std::size_t o = static_cast<std::size_t>((x + y * sprite.width) * 4);
             const std::size_t pi = static_cast<std::size_t>(idx) * 3;
             if (hasShadowMask && sprite.shadowMask[si] != 0) {
-                rgba[o + 0] = 0;
-                rgba[o + 1] = 0;
-                rgba[o + 2] = 0;
-                rgba[o + 3] = 255;
+                if (omitShadow) {
+                    rgba[o + 3] = 0;
+                } else {
+                    rgba[o + 0] = 0;
+                    rgba[o + 1] = 0;
+                    rgba[o + 2] = 0;
+                    rgba[o + 3] = 255;
+                }
             } else if (idx == sprite.transIndex ||
                        (sprite.colorKeyed && paletteRgb[pi] == tr && paletteRgb[pi + 1] == tg &&
                         paletteRgb[pi + 2] == tb)) {
@@ -720,11 +758,15 @@ SDL_Texture *T4CV2SpriteAtlas::createOutlineTextureFromDecoded(const DecodedSpri
 
 const T4CV2SpriteAtlas::CachedSprite *T4CV2SpriteAtlas::decodeAndCache(const std::string &spriteName,
                                                                          const bool respectBudget,
-                                                                         const int paletteVariant) const {
+                                                                         const int paletteVariant,
+                                                                         const bool omitShadow) const {
     std::string cacheKey = spriteName;
     if (paletteVariant >= 0) {
         cacheKey += "#p";
         cacheKey += std::to_string(paletteVariant);
+    }
+    if (omitShadow) {
+        cacheKey += "#noshad";
     }
 
     auto it = spriteCache_.find(cacheKey);
@@ -734,16 +776,25 @@ const T4CV2SpriteAtlas::CachedSprite *T4CV2SpriteAtlas::decodeAndCache(const std
 
     const DidEntry *entry = findEntry(spriteName);
     if (!entry) {
+        LogSpriteIssueOnce("index absent", spriteName);
         spriteCache_[cacheKey] = {};
         return nullptr;
     }
 
     if (respectBudget && decodeBudget_ <= 0) {
+        LogSpriteIssueOnce("budget epuise", spriteName);
         return nullptr;
     }
 
     DecodedSprite decoded;
     if (!decodeSprite(*entry, decoded)) {
+        char detail[48];
+        std::snprintf(detail, sizeof(detail), "banque %u off %u", entry->dataFileIndex, entry->fileOffset);
+        LogSpriteIssueOnce("decode KO", spriteName, detail);
+        spriteCache_[cacheKey] = {};
+        return nullptr;
+    }
+    if (decoded.width <= 0 || decoded.height <= 0) {
         spriteCache_[cacheKey] = {};
         return nullptr;
     }
@@ -764,7 +815,7 @@ const T4CV2SpriteAtlas::CachedSprite *T4CV2SpriteAtlas::decodeAndCache(const std
     }
 
     const std::uint8_t *pal = paletteForSprite(spriteName, paletteVariant);
-    SDL_Texture *tex = createTextureFromDecoded(decoded, pal, alphaMask);
+    SDL_Texture *tex = createTextureFromDecoded(decoded, pal, alphaMask, omitShadow);
     CachedSprite cached;
     cached.tex = tex;
     cached.outlineTex = tex ? createOutlineTextureFromDecoded(decoded, pal) : nullptr;
@@ -788,6 +839,23 @@ int T4CV2SpriteAtlas::PreloadSprites(const std::vector<std::string> &names, cons
 
     int examined = 0;
     while (startIndex + examined < static_cast<int>(names.size()) && examined < maxCount) {
+        const std::string &name = names[static_cast<std::size_t>(startIndex + examined)];
+        if (spriteCache_.find(name) == spriteCache_.end()) {
+            decodeAndCache(name, false);
+        }
+        examined += 1;
+    }
+    return examined;
+}
+
+int T4CV2SpriteAtlas::PreloadSpritesForMs(const std::vector<std::string> &names, const int startIndex,
+                                          const int maxMs) const {
+    if (maxMs <= 0 || startIndex < 0 || static_cast<std::size_t>(startIndex) >= names.size()) {
+        return 0;
+    }
+    const Uint64 deadline = SDL_GetTicks() + static_cast<Uint64>(maxMs);
+    int examined = 0;
+    while (startIndex + examined < static_cast<int>(names.size()) && SDL_GetTicks() < deadline) {
         const std::string &name = names[static_cast<std::size_t>(startIndex + examined)];
         if (spriteCache_.find(name) == spriteCache_.end()) {
             decodeAndCache(name, false);
@@ -1053,12 +1121,13 @@ std::string T4CV2SpriteAtlas::IsoSpriteName(const std::uint16_t tileId, const un
 
 bool T4CV2SpriteAtlas::TryDrawSpriteByName(SDL_Renderer *renderer, const std::string &spriteName,
                                            const float screenX, const float screenY,
-                                           const bool flipHorizontal, const int paletteVariant) const {
+                                           const bool flipHorizontal, const int paletteVariant,
+                                           const bool omitShadow) const {
     if (!ready_ || !renderer || spriteName.empty()) {
         return false;
     }
 
-    const CachedSprite *sprite = decodeAndCache(spriteName, true, paletteVariant);
+    const CachedSprite *sprite = decodeAndCache(spriteName, true, paletteVariant, omitShadow);
     if (!sprite || !sprite->tex) {
         return false;
     }

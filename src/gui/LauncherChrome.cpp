@@ -56,12 +56,14 @@ bool LauncherChrome::init(SDL_Renderer *renderer) {
     layoutBannerForLogicalSize(800.f, 600.f);
     banner_.setSpeed(42.f);
     banner_.resetScroll();
+    banner_.startTicker();
 
     lastTickMs_ = SDL_GetTicks();
     return true;
 }
 
 void LauncherChrome::shutdown() {
+    banner_.stopTicker();
     if (background_) {
         SDL_DestroyTexture(background_);
         background_ = nullptr;

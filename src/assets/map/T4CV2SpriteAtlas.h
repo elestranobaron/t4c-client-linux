@@ -34,7 +34,8 @@ class T4CV2SpriteAtlas {
                           float screenX, float screenY) const;
 
     bool TryDrawSpriteByName(SDL_Renderer *renderer, const std::string &spriteName, float screenX, float screenY,
-                             bool flipHorizontal = false, int paletteVariant = -1) const;
+                             bool flipHorizontal = false, int paletteVariant = -1,
+                             bool omitShadow = false) const;
 
     /** Contour 1px autour du masque alpha (FX_OUTLINE Windows). */
     bool TryDrawSpriteOutline(SDL_Renderer *renderer, const std::string &spriteName, float screenX, float screenY,
@@ -47,6 +48,9 @@ class T4CV2SpriteAtlas {
 
     /** Pre-decode jusqu'a maxCount sprites (ignore le budget frame). Retourne le nombre traite. */
     int PreloadSprites(const std::vector<std::string> &names, int startIndex, int maxCount) const;
+
+    /** Pre-decode sprites jusqu'a expiration du budget temps (ms) — garde l'UI reactive. */
+    int PreloadSpritesForMs(const std::vector<std::string> &names, int startIndex, int maxMs) const;
 
     /** Charge en RAM les banques .dda requises par la liste de noms. */
     void PreloadBanksForNames(const std::vector<std::string> &names) const;
@@ -102,10 +106,11 @@ class T4CV2SpriteAtlas {
     const std::uint8_t *paletteForSprite(const std::string &spriteName, int paletteVariant = -1) const;
     const CachedSprite *getOrCreateSprite(const std::string &spriteName) const;
     const CachedSprite *decodeAndCache(const std::string &spriteName, bool respectBudget,
-                                       int paletteVariant = -1) const;
+                                       int paletteVariant = -1, bool omitShadow = false) const;
     static std::string NormalizeDidKey(const std::string &name);
     SDL_Texture *createTextureFromDecoded(const DecodedSprite &sprite, const std::uint8_t *paletteRgb,
-                                          const DecodedSprite *alphaMask = nullptr) const;
+                                          const DecodedSprite *alphaMask = nullptr,
+                                          bool omitShadow = false) const;
     SDL_Texture *createOutlineTextureFromDecoded(const DecodedSprite &sprite,
                                                  const std::uint8_t *paletteRgb) const;
     static std::string IsoSpriteName(std::uint16_t tileId, unsigned int worldX, unsigned int worldY);

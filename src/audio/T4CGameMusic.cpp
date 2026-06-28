@@ -407,14 +407,16 @@ const char *PickCreatureHitSfx(const char *spriteBase) {
         {"Bat", "Bat Hit"},         {"Beast", "Beast Hit"},       {"Beholder", "Beholder Hit"},
         {"Demon", "Demon Hit"},     {"Minotaur", "Minotaur Hit"}, {"Mummy", "Mummy Hit"},
         {"Kraanian", "Kraanian Hit"}, {"Atrocity", "Atrocity Hit"}, {"Kobold", "Kobold Hit"},
-        {"Centaur", "Centaur Hit"},
+        {"Centaur", "Centaur Hit"}, {"Rat", "Rat Hit"},           {"Spider", "Spider Hit"},
+        {"Orc", "Orc Hit"},         {"Zombie", "Zombie Hit"},     {"Goblin", "Goblin Hit"},
+        {"Wolf", "Wolf Hit"},
     };
     for (const auto &row : kHitTable) {
         if (std::strcmp(spriteBase, row.base) == 0) {
             return row.sfx;
         }
     }
-    return "Beast Hit";
+    return "Male Hit 1";
 }
 
 }  // namespace

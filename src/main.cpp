@@ -204,7 +204,6 @@ int main(int argc, char *argv[]) {
             }
         } else if (phase == AppPhase::WorldLoading) {
             const Uint64 frameStart = SDL_GetTicks();
-            world.PollLoad(16);
 
             SDL_Event loadEvent;
             while (SDL_PollEvent(&loadEvent)) {
@@ -217,9 +216,13 @@ int main(int argc, char *argv[]) {
                 break;
             }
 
+            T4CLoginSessionPollBackgroundTasks();
             launcherChrome.update();
             world.RenderLoading(renderer, &launcherChrome);
             launcherChrome.renderBanner(renderer);
+            SDL_RenderPresent(renderer);
+
+            world.PollLoadForMs(12);
 
             if (world.IsReady()) {
                 T4CActivePlayer active{};

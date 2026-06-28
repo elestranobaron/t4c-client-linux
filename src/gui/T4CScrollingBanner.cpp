@@ -5,8 +5,16 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <string>
+#include <thread>
+
+T4CScrollingBanner::T4CScrollingBanner() = default;
+
+T4CScrollingBanner::~T4CScrollingBanner() {
+    stopTicker();
+}
 
 void T4CScrollingBanner::setText(std::string text) {
     text_ = std::move(text);
@@ -17,17 +25,44 @@ void T4CScrollingBanner::setBandRect(const float x, const float y, const float w
 }
 
 void T4CScrollingBanner::setSpeed(const float pixelsPerSecond) {
-    speed_ = pixelsPerSecond;
+    speed_.store(pixelsPerSecond);
 }
 
 void T4CScrollingBanner::resetScroll() {
-    scrollStartMs_ = SDL_GetTicks();
+    scrollPx_.store(0.f);
+}
+
+void T4CScrollingBanner::startTicker() {
+    if (tickerRunning_.load()) {
+        return;
+    }
+    tickerRunning_.store(true);
+    ticker_ = std::thread([this] { tickerLoop(); });
+}
+
+void T4CScrollingBanner::stopTicker() {
+    if (!tickerRunning_.exchange(false)) {
+        return;
+    }
+    if (ticker_.joinable()) {
+        ticker_.join();
+    }
+}
+
+void T4CScrollingBanner::tickerLoop() {
+    using clock = std::chrono::steady_clock;
+    auto last = clock::now();
+    while (tickerRunning_.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        const auto now = clock::now();
+        const float dt = std::chrono::duration<float>(now - last).count();
+        last = now;
+        scrollPx_.store(scrollPx_.load() + speed_.load() * dt);
+    }
 }
 
 void T4CScrollingBanner::update(const float /*deltaSeconds*/) {
-    if (scrollStartMs_ == 0) {
-        scrollStartMs_ = SDL_GetTicks();
-    }
+    /* Defilement pilote par tickerLoop() — update() conserve pour compat LauncherChrome. */
 }
 
 void T4CScrollingBanner::render(SDL_Renderer *renderer, const T4CUiFont &font, const SDL_Color color) const {
@@ -42,11 +77,7 @@ void T4CScrollingBanner::render(SDL_Renderer *renderer, const T4CUiFont &font, c
         return;
     }
 
-    Uint64 startMs = scrollStartMs_;
-    if (startMs == 0) {
-        startMs = SDL_GetTicks();
-    }
-    const float scrollX = speed_ * static_cast<float>(SDL_GetTicks() - startMs) * 0.001f;
+    const float scrollX = scrollPx_.load();
     const float loop = static_cast<float>(tw) + 80.f;
     float x = band_.x - std::fmod(scrollX, loop);
     const float y = band_.y + (band_.h - static_cast<float>(th)) * 0.5f;
