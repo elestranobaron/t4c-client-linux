@@ -149,6 +149,46 @@ T4C_TEST(walk_anim_nine_frame_cycle) {
     T4C_ASSERT_EQ(T4CWalkAnimNextFrame(frame), 0);
 }
 
+T4C_TEST(walk_anim_npc_six_frame_cycle) {
+    T4C_ASSERT_EQ(kT4CNpcWalkAnimFrames, 6);
+    int frame = 0;
+    for (int i = 0; i < 5; ++i) {
+        frame = T4CWalkAnimNextNpcFrame(frame);
+    }
+    T4C_ASSERT_EQ(frame, 5);
+    T4C_ASSERT_EQ(T4CWalkAnimNextNpcFrame(frame), 0);
+    T4CUnitSpriteView view{};
+    view.angleDegrees = 180;
+    T4C_ASSERT(T4CUnitSpriteFrameName("Rat", view, 5, kT4CNpcWalkAnimFrames - 1) == "Rat180-f");
+}
+
+T4C_TEST(walk_anim_puppet_thirteen_frame_cycle) {
+    T4C_ASSERT_EQ(kT4CPuppetWalkAnimFrames, 13);
+    int frame = 0;
+    for (int i = 0; i < 12; ++i) {
+        frame = T4CWalkAnimNextPuppetFrame(frame);
+    }
+    T4C_ASSERT_EQ(frame, 12);
+    T4C_ASSERT_EQ(T4CWalkAnimNextPuppetFrame(frame), 0);
+}
+
+T4C_TEST(idle_sprite_frame_names) {
+    T4CUnitSpriteView view{};
+    view.angleDegrees = 180;
+    T4C_ASSERT(T4CUnitSpriteIdleFrameName("Warrio", view, 0) == "WarrioStMov180-a");
+    T4C_ASSERT(T4CUnitSpriteIdleFrameName("Warrio", view, 3) == "WarrioStMov180-d");
+}
+
+T4C_TEST(idle_anim_four_frame_cycle) {
+    T4C_ASSERT_EQ(kT4CIdleAnimFrames, 4);
+    int frame = 0;
+    for (int i = 0; i < 3; ++i) {
+        frame = T4CWalkAnimNextIdleFrame(frame);
+    }
+    T4C_ASSERT_EQ(frame, 3);
+    T4C_ASSERT_EQ(T4CWalkAnimNextIdleFrame(frame), 0);
+}
+
 T4C_TEST(walk_sprite_frame_names) {
     T4CUnitSpriteView view{};
     view.angleDegrees = 90;
@@ -164,6 +204,19 @@ T4C_TEST(attack_sprite_frame_names) {
     T4C_ASSERT(T4CUnitAttackSpriteFrameName("Goblin", view, 0) == "GoblinA045-a");
     T4C_ASSERT(T4CUnitAttackSpriteFrameName("Goblin", view, 3) == "GoblinA045-d");
     T4C_ASSERT(T4CUnitAttackSpriteFrameName("Goblin", view, 8) == "GoblinA045-i");
+}
+
+T4C_TEST(corpse_sprite_frame_names) {
+    T4C_ASSERT(T4CUnitCorpseSpriteFrameName("Goblin", 0) == "GoblinC-a");
+    T4C_ASSERT(T4CUnitCorpseSpriteFrameName("Goblin", 2) == "GoblinC-c");
+}
+
+T4C_TEST(creature_corpse_deposit_object_type) {
+    T4C_ASSERT(T4CIsCreatureCorpseAppearance(16005));
+    T4C_ASSERT(T4CIsCreatureCorpseAppearance(26005));
+    T4C_ASSERT(!T4CIsCreatureCorpseAppearance(20001));
+    T4C_ASSERT(T4CNormalizeDepositObjectType(16005) == 15005);
+    T4C_ASSERT(T4CNormalizeDepositObjectType(10002) == 20039);
 }
 
 T4C_TEST(sprite_palette_key) {
@@ -200,6 +253,10 @@ int main() {
     T4C_RUN(teleport_snaps_display);
     T4C_RUN(walk_anim_reset_policy);
     T4C_RUN(walk_anim_nine_frame_cycle);
+    T4C_RUN(walk_anim_npc_six_frame_cycle);
+    T4C_RUN(walk_anim_puppet_thirteen_frame_cycle);
+    T4C_RUN(idle_sprite_frame_names);
+    T4C_RUN(idle_anim_four_frame_cycle);
     T4C_RUN(walk_sprite_frame_names);
     T4C_RUN(attack_sprite_frame_names);
     T4C_RUN(sprite_palette_key);
