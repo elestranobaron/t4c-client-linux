@@ -102,3 +102,19 @@ struct T4CPlayerEquipment {
     std::vector<T4CEquippedItem> items;
     bool valid{false};
 };
+
+/** Objet dans un coffre (opcode 220 RQ_ChestNewContents). */
+struct T4CChestItem {
+    std::string name;
+    std::int32_t objectId{0};
+    std::uint16_t appearance{0};
+    std::uint16_t baseId{0};
+    std::uint32_t qty{0};
+    std::int32_t charges{0};
+    std::int32_t equipPos{0};
+};
+
+struct T4CChestList {
+    std::vector<T4CChestItem> items;
+    bool valid{false};
+};

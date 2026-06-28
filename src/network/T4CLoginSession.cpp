@@ -82,6 +82,7 @@ T4CCharacterRolledStats g_rolledStats{};
 std::mutex g_rolledMutex;
 
 std::unordered_map<std::int32_t, std::uint16_t> g_remoteAppearance;
+std::unordered_set<std::int32_t> g_dyingUnits;
 
 std::unordered_map<std::int32_t, T4CPuppetDress> g_remotePuppet;
 std::unordered_map<std::int32_t, std::pair<unsigned int, unsigned int>> g_pendingPuppetRequest;
@@ -165,6 +166,13 @@ T4CNpcSpeech g_pendingSpeech{};
 std::atomic<bool> g_speechPending{false};
 T4CShopList g_shopList{};
 std::atomic<bool> g_shopDirty{false};
+T4CChestList g_chestList{};
+std::atomic<bool> g_chestDirty{false};
+
+std::mutex g_localCastMutex;
+bool g_localCastPending = false;
+unsigned g_localCastTargetX = 0;
+unsigned g_localCastTargetY = 0;
 
 /** Delai minimal avant nouvel essai Register (ms, horloge SDL_GetTicks). */
 std::atomic<Uint32> g_reconnectAllowedAfterTick{0};
@@ -193,6 +201,10 @@ std::atomic<bool> g_pendingNearItems{false};
  * traiter ce 16 comme un rafraichissement complet (purge sol + unites disparues), contrairement
  * aux bandes peripheriques poussees par le serveur pendant le deplacement. */
 std::atomic<bool> g_expectInviewRefresh{false};
+/** Opcode 46 differe jusqu'a la fin du chargement carte/sprites (evite in_game serveur pendant le loading). */
+std::atomic<bool> g_deferredEnterWorld46{false};
+/** Opcode 46 differe apres reload carte suite a RQ_TeleportPlayer (57). */
+std::atomic<bool> g_deferredTeleportResync{false};
 std::atomic<bool> g_pendingTeleport{false};
 T4CPlayerTeleport g_teleportPayload{};
 std::mutex g_teleportMutex;
@@ -371,6 +383,8 @@ void ResetLoginSessionState() {
     g_enterWorld46RetryCount.store(0);
     g_pendingNearItems.store(false);
     g_expectInviewRefresh.store(false);
+    g_deferredEnterWorld46.store(false);
+    g_deferredTeleportResync.store(false);
     {
         std::lock_guard<std::mutex> lock(g_activeMutex);
         g_activePlayer = {};
@@ -530,9 +544,10 @@ void ApplyPuppetDressToPlayer(T4CActivePlayer *player, const T4CPuppetDress &dre
 }
 
 bool IsRemoteDrawableUnit(std::uint16_t appearance) {
-    // Plage des unites (joueurs 10001-10012, PNJ 10005-10010, cadavres 15xxx,
-    // monstres 20xxx, cadavres monstres 25xxx). Les objets au sol (< 10000) sont
-    // exclus. Apparence mappee -> sprite ; sinon marqueur (au moins visible).
+    /* Cadavres (15xxx / 25xxx) : un seul objet Windows (ChangeType), jamais un spawn GetNearItems separe. */
+    if (T4CIsCreatureCorpseAppearance(appearance)) {
+        return false;
+    }
     return appearance >= 10001 && appearance <= 29999;
 }
 
@@ -623,7 +638,13 @@ bool IsLocalPlayerUnitId(std::int32_t unitId) {
            static_cast<std::uint32_t>(g_activePlayer.unitId);
 }
 
-bool IsLocalPlayerMoveTarget(const int sx, const int sy) {
+bool IsLocalPlayerMoveTarget(const int sx, const int sy, const std::int32_t unitId) {
+    if (IsLocalPlayerUnitId(unitId)) {
+        return true;
+    }
+    if (unitId != 0) {
+        return false;
+    }
     std::lock_guard<std::mutex> lock(g_activeMutex);
     if (!g_activePlayer.valid) {
         return false;
@@ -641,12 +662,26 @@ void PushRemoteEvent(T4CRemoteUnitEvent ev) {
 void RememberRemoteAppearance(std::int32_t unitId, std::uint16_t appearance) {
     if (unitId != 0 && appearance != 0) {
         std::lock_guard<std::mutex> lock(g_remoteMutex);
+        if (g_dyingUnits.find(unitId) != g_dyingUnits.end()) {
+            return;
+        }
         g_remoteAppearance[unitId] = appearance;
     }
 }
 
+static bool IsRemoteUnitDying(const std::int32_t unitId) {
+    if (unitId == 0) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(g_remoteMutex);
+    return g_dyingUnits.find(unitId) != g_dyingUnits.end();
+}
+
 void QueueRemoteSpawn(unsigned int x, unsigned int y, std::uint16_t appearance, std::int32_t unitId,
-                      char hpPercent) {
+                      char hpPercent, char friendStatus) {
+    if (IsRemoteUnitDying(unitId)) {
+        return;
+    }
     appearance = NormalizeServerAppearance(appearance);
     if (!IsRemoteDrawableUnit(appearance) ||
         T4CLoginSessionShouldSkipRemoteUnit(appearance, unitId, x, y)) {
@@ -670,12 +705,13 @@ void QueueRemoteSpawn(unsigned int x, unsigned int y, std::uint16_t appearance, 
     ev.x = x;
     ev.y = y;
     ev.hpPercent = hpPercent;
+    ev.friendStatus = friendStatus;
     PushRemoteEvent(ev);
 }
 
-void QueueRemoteMove(unsigned int x, unsigned int y, std::uint16_t unitId, std::uint16_t moveOpcode,
+void QueueRemoteMove(unsigned int x, unsigned int y, std::int32_t unitId, std::uint16_t moveOpcode,
                      std::uint16_t appearanceHint) {
-    if (IsLocalPlayerUnitId(unitId)) {
+    if (IsLocalPlayerUnitId(unitId) || IsRemoteUnitDying(unitId)) {
         return;
     }
     if (appearanceHint != 0) {
@@ -716,6 +752,7 @@ void QueueRemoteRemove(std::int32_t unitId) {
         g_remoteAppearance.erase(unitId);
         g_remotePuppet.erase(unitId);
         g_pendingPuppetRequest.erase(unitId);
+        g_dyingUnits.erase(unitId);
     }
     T4CRemoteUnitEvent ev{};
     ev.kind = T4CRemoteUnitEventKind::Remove;
@@ -723,7 +760,23 @@ void QueueRemoteRemove(std::int32_t unitId) {
     PushRemoteEvent(ev);
 }
 
-bool ParseUnitInfo(TFCPacket *msg, std::uint16_t *appearance, std::int32_t *unitId, char *hpPercent) {
+void QueueRemoteDie(std::int32_t unitId, const std::uint16_t corpseAppearance) {
+    if (unitId == 0 || IsLocalPlayerUnitId(unitId)) {
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_remoteMutex);
+        g_dyingUnits.insert(unitId);
+    }
+    T4CRemoteUnitEvent ev{};
+    ev.kind = T4CRemoteUnitEventKind::Die;
+    ev.unitId = unitId;
+    ev.appearance = corpseAppearance;
+    PushRemoteEvent(ev);
+}
+
+bool ParseUnitInfo(TFCPacket *msg, std::uint16_t *appearance, std::int32_t *unitId, char *hpPercent,
+                   char *outFriendStatus) {
     if (!msg || !appearance || !unitId) {
         return false;
     }
@@ -752,6 +805,9 @@ bool ParseUnitInfo(TFCPacket *msg, std::uint16_t *appearance, std::int32_t *unit
     *unitId = static_cast<std::int32_t>(id);
     if (hpPercent) {
         *hpPercent = hp;
+    }
+    if (outFriendStatus) {
+        *outFriendStatus = status;
     }
     return true;
 }
@@ -872,9 +928,27 @@ void ApplyEquipmentToLocalPuppet(const T4CPlayerEquipment &equipment) {
     }
 }
 
+void QueueRemoteCombatSnap(const std::int32_t unitId, const unsigned int x, const unsigned int y,
+                           const std::uint16_t appearance) {
+    if (unitId == 0 || IsLocalPlayerUnitId(unitId) || IsRemoteUnitDying(unitId)) {
+        return;
+    }
+    if (appearance != 0) {
+        RememberRemoteAppearance(unitId, appearance);
+    }
+    T4CRemoteUnitEvent ev{};
+    ev.kind = T4CRemoteUnitEventKind::Update;
+    ev.unitId = unitId;
+    ev.x = x;
+    ev.y = y;
+    ev.appearance = appearance;
+    ev.snapDisplay = true;
+    PushRemoteEvent(ev);
+}
+
 void QueueRemoteAttack(std::int32_t unitId, unsigned int x, unsigned int y, char hpPercent, unsigned int targetX,
                        unsigned int targetY, const bool hasTarget) {
-    if (unitId == 0 || IsLocalPlayerUnitId(unitId)) {
+    if (unitId == 0 || IsLocalPlayerUnitId(unitId) || IsRemoteUnitDying(unitId)) {
         return;
     }
     T4CRemoteUnitEvent ev{};
@@ -883,6 +957,7 @@ void QueueRemoteAttack(std::int32_t unitId, unsigned int x, unsigned int y, char
     ev.x = x;
     ev.y = y;
     ev.hpPercent = hpPercent;
+    ev.snapDisplay = true;
     if (hasTarget) {
         ev.targetX = targetX;
         ev.targetY = targetY;
@@ -1058,13 +1133,25 @@ void HandleAttackResult(TFCPacket *msg) {
 
     const char *attackerSprite = T4CSpriteNameFromAppearance(attackerAppearance);
     const char *defenderSprite = T4CSpriteNameFromAppearance(defenderAppearance);
-    if (!IsLocalPlayerUnitId(idAttack)) {
+    const bool attackerDying =
+        !IsLocalPlayerUnitId(idAttack) && IsRemoteUnitDying(static_cast<std::int32_t>(idAttack));
+    const bool defenderDying =
+        !IsLocalPlayerUnitId(idDefend) && idDefend != 0 && IsRemoteUnitDying(static_cast<std::int32_t>(idDefend));
+    /* Windows Packet.cpp 10001 : MoveObject(IDAttack, AXPos, AYPos) + MoveObject(IDDefend, DXPos, DYPos)
+     * avant SetAttack — sinon le defenseur reste a l'ancienne tuile (= clone visuel au 1er coup). */
+    if (!IsLocalPlayerUnitId(idAttack) && !attackerDying) {
+        QueueRemoteCombatSnap(static_cast<std::int32_t>(idAttack), uax, uay, attackerAppearance);
+    }
+    if (!IsLocalPlayerUnitId(idDefend) && idDefend != 0 && !defenderDying) {
+        QueueRemoteCombatSnap(static_cast<std::int32_t>(idDefend), udx, udy, defenderAppearance);
+    }
+    if (!IsLocalPlayerUnitId(idAttack) && !attackerDying) {
         if (!IsRemoteUnitTracked(static_cast<std::int32_t>(idAttack))) {
             RequestMissingUnit(static_cast<std::int32_t>(idAttack), ax, ay);
         }
         T4CGameMusic::PlayCreatureAttackSfx(attackerSprite);
         QueueRemoteAttack(static_cast<std::int32_t>(idAttack), uax, uay, hpPercent, udx, udy, true);
-    } else {
+    } else if (IsLocalPlayerUnitId(idAttack)) {
         /* Le joueur attaque : whoosh + animation de swing locale (vers le defenseur). */
         T4CGameMusic::PlayCreatureAttackSfx(nullptr);
         std::lock_guard<std::mutex> lock(g_localAttackMutex);
@@ -1072,23 +1159,36 @@ void HandleAttackResult(TFCPacket *msg) {
         g_localAttackTargetX = udx;
         g_localAttackTargetY = udy;
     }
-    if (!IsLocalPlayerUnitId(idDefend) && idDefend != 0 &&
+    if (!IsLocalPlayerUnitId(idDefend) && idDefend != 0 && !defenderDying &&
         !IsRemoteUnitTracked(static_cast<std::int32_t>(idDefend))) {
         RequestMissingUnit(static_cast<std::int32_t>(idDefend), dx, dy);
     }
     if (IsLocalPlayerUnitId(idDefend)) {
         T4CGameMusic::PlayPlayerHitSfx();
-    } else if (defenderSprite) {
+    } else if (!defenderDying) {
         T4CGameMusic::PlayCreatureHitSfx(defenderSprite);
     }
-    if (!IsLocalPlayerUnitId(idDefend)) {
-        T4CRemoteUnitEvent ev{};
-        ev.kind = T4CRemoteUnitEventKind::Update;
-        ev.unitId = static_cast<std::int32_t>(idDefend);
-        ev.x = udx;
-        ev.y = udy;
-        ev.hpPercent = hpPercent;
-        PushRemoteEvent(ev);
+    if (!IsLocalPlayerUnitId(idDefend) && idDefend != 0 && !defenderDying) {
+        if (hpPercent <= 0) {
+            std::uint16_t liveApp = defenderAppearance;
+            if (liveApp == 0) {
+                liveApp = LookupRemoteAppearance(static_cast<std::int32_t>(idDefend));
+            }
+            if (liveApp != 0) {
+                const std::uint16_t corpseApp = T4CIsCreatureCorpseAppearance(liveApp)
+                                                    ? liveApp
+                                                    : T4CCreatureCorpseAppearanceFromLive(liveApp);
+                QueueRemoteDie(static_cast<std::int32_t>(idDefend), corpseApp);
+            }
+        } else {
+            T4CRemoteUnitEvent ev{};
+            ev.kind = T4CRemoteUnitEventKind::Update;
+            ev.unitId = static_cast<std::int32_t>(idDefend);
+            ev.x = udx;
+            ev.y = udy;
+            ev.hpPercent = hpPercent;
+            PushRemoteEvent(ev);
+        }
     }
 }
 
@@ -1114,7 +1214,19 @@ void HandleAttackMiss(TFCPacket *msg) {
     const std::uint16_t attackerAppearance = LookupRemoteAppearance(static_cast<std::int32_t>(idAttack));
     T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase, "[PHASE] <- attaque ratee (10002) att=%ld def=%ld",
                            static_cast<long>(idAttack), static_cast<long>(idDefend));
-    if (!IsLocalPlayerUnitId(idAttack)) {
+    const bool attackerDying =
+        !IsLocalPlayerUnitId(idAttack) && IsRemoteUnitDying(static_cast<std::int32_t>(idAttack));
+    const bool defenderDying =
+        !IsLocalPlayerUnitId(idDefend) && idDefend != 0 && IsRemoteUnitDying(static_cast<std::int32_t>(idDefend));
+    if (!IsLocalPlayerUnitId(idAttack) && !attackerDying) {
+        QueueRemoteCombatSnap(static_cast<std::int32_t>(idAttack), static_cast<unsigned>(ax),
+                              static_cast<unsigned>(ay), attackerAppearance);
+    }
+    if (!IsLocalPlayerUnitId(idDefend) && idDefend != 0 && !defenderDying) {
+        QueueRemoteCombatSnap(static_cast<std::int32_t>(idDefend), static_cast<unsigned>(dx),
+                              static_cast<unsigned>(dy), LookupRemoteAppearance(static_cast<std::int32_t>(idDefend)));
+    }
+    if (!IsLocalPlayerUnitId(idAttack) && !attackerDying) {
         if (!IsRemoteUnitTracked(static_cast<std::int32_t>(idAttack))) {
             RequestMissingUnit(static_cast<std::int32_t>(idAttack), ax, ay);
         }
@@ -1123,7 +1235,7 @@ void HandleAttackMiss(TFCPacket *msg) {
         QueueRemoteAttack(static_cast<std::int32_t>(idAttack), static_cast<unsigned>(ax),
                           static_cast<unsigned>(ay), 0, static_cast<unsigned>(dx),
                           static_cast<unsigned>(dy), true);
-    } else {
+    } else if (IsLocalPlayerUnitId(idAttack)) {
         T4CGameMusic::PlayCreatureAttackSfx(nullptr);
         std::lock_guard<std::mutex> lock(g_localAttackMutex);
         g_localAttackPending = true;
@@ -1131,6 +1243,7 @@ void HandleAttackMiss(TFCPacket *msg) {
         g_localAttackTargetY = static_cast<unsigned>(dy);
     }
     if (!IsLocalPlayerUnitId(idDefend) && idDefend != 0 &&
+        !IsRemoteUnitDying(static_cast<std::int32_t>(idDefend)) &&
         !IsRemoteUnitTracked(static_cast<std::int32_t>(idDefend))) {
         RequestMissingUnit(static_cast<std::int32_t>(idDefend), dx, dy);
     }
@@ -1351,6 +1464,127 @@ void HandleServerMessage(TFCPacket *msg) {
 }
 
 /** Opcode 102 RQ_InfoMessage : info popup serveur. */
+void HandleShowChestNew(TFCPacket *msg) {
+    if (!WorldSessionReceiving()) {
+        return;
+    }
+    SkipOpcode(msg);
+    {
+        std::lock_guard<std::mutex> lock(g_talkMutex);
+        g_chestList.valid = true;
+        if (g_chestList.items.empty()) {
+            g_chestList.items.clear();
+        }
+    }
+    g_chestDirty.store(true);
+}
+
+void HandleHideChestNew(TFCPacket *msg) {
+    if (!WorldSessionReceiving()) {
+        return;
+    }
+    SkipOpcode(msg);
+    {
+        std::lock_guard<std::mutex> lock(g_talkMutex);
+        g_chestList = {};
+    }
+    g_chestDirty.store(true);
+}
+
+void HandleChestNewContents(TFCPacket *msg) {
+    if (!WorldSessionReceiving()) {
+        return;
+    }
+    SkipOpcode(msg);
+    short count = 0;
+    msg->Get(&count);
+    T4CChestList chest{};
+    chest.valid = true;
+    chest.items.reserve(static_cast<size_t>(count < 0 ? 0 : count));
+    for (int i = 0; i < count; ++i) {
+        T4CChestItem item{};
+        if (!ReadPacketString(msg, &item.name)) {
+            break;
+        }
+        short appearance = 0;
+        long objectId = 0;
+        short baseId = 0;
+        long qty = 0;
+        long charges = 0;
+        long equipPos = 0;
+        msg->Get(&appearance);
+        msg->Get(&objectId);
+        msg->Get(&baseId);
+        msg->Get(&qty);
+        msg->Get(&charges);
+        msg->Get(&equipPos);
+        item.appearance = static_cast<std::uint16_t>(appearance);
+        item.objectId = static_cast<std::int32_t>(objectId);
+        item.baseId = static_cast<std::uint16_t>(baseId);
+        item.qty = qty < 0 ? 0u : static_cast<std::uint32_t>(qty);
+        item.charges = static_cast<std::int32_t>(charges);
+        item.equipPos = static_cast<std::int32_t>(equipPos);
+        chest.items.push_back(std::move(item));
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_talkMutex);
+        g_chestList = std::move(chest);
+    }
+    g_chestDirty.store(true);
+}
+
+void QueueLocalCastAnim(const unsigned targetX, const unsigned targetY) {
+    std::lock_guard<std::mutex> lock(g_localCastMutex);
+    g_localCastPending = true;
+    g_localCastTargetX = targetX;
+    g_localCastTargetY = targetY;
+}
+
+/** Opcode 64 RQ_SpellEffect : effet visuel + orientation lanceur (Packet.cpp L1221). */
+void HandleSpellEffect(TFCPacket *msg) {
+    if (!WorldSessionReceiving()) {
+        return;
+    }
+    SkipOpcode(msg);
+    short spellId = 0;
+    long casterId = 0;
+    long targetId = 0;
+    short targetX = 0;
+    short targetY = 0;
+    short castX = 0;
+    short castY = 0;
+    long spellEffectId = 0;
+    long spellChildId = 0;
+    msg->Get(&spellId);
+    msg->Get(&casterId);
+    msg->Get(&targetId);
+    msg->Get(&targetX);
+    msg->Get(&targetY);
+    msg->Get(&castX);
+    msg->Get(&castY);
+    msg->Get(&spellEffectId);
+    msg->Get(&spellChildId);
+    (void)spellId;
+    (void)spellEffectId;
+    (void)spellChildId;
+    if (IsLocalPlayerUnitId(casterId)) {
+        unsigned aimX = static_cast<unsigned>(targetX);
+        unsigned aimY = static_cast<unsigned>(targetY);
+        if (aimX == 0 && aimY == 0 && (castX != 0 || castY != 0)) {
+            aimX = static_cast<unsigned>(castX);
+            aimY = static_cast<unsigned>(castY);
+        }
+        if (aimX == 0 && aimY == 0) {
+            std::lock_guard<std::mutex> lock(g_activeMutex);
+            if (g_activePlayer.valid) {
+                aimX = g_activePlayer.serverX;
+                aimY = g_activePlayer.serverY;
+            }
+        }
+        QueueLocalCastAnim(aimX, aimY);
+    }
+}
+
 void HandleInfoMessage(TFCPacket *msg) {
     if (!WorldSessionReceiving()) {
         return;
@@ -1611,8 +1845,19 @@ void HandleBackpackAfterUse(TFCPacket *msg) {
         }
     }
     if (!found) {
-        /* Objet inconnu localement : resynchronise le sac complet. */
-        SendOpcodeOnly(static_cast<short>(RQ_ViewInv));
+        /* Objet ramasse / inconnu localement : ajoute depuis l'opcode 123 puis resync sac (154). */
+        T4CBagItem item{};
+        item.appearance = static_cast<std::uint16_t>(appearance);
+        item.objectId = static_cast<std::int32_t>(itemId);
+        item.baseId = static_cast<std::uint16_t>(baseId);
+        item.qty = qty < 0 ? 0u : static_cast<std::uint32_t>(qty);
+        item.charges = static_cast<std::int32_t>(charges);
+        {
+            std::lock_guard<std::mutex> lock(g_inventoryMutex);
+            g_backpack.items.push_back(item);
+            g_backpack.valid = true;
+        }
+        SendOpcodeOnly(static_cast<short>(RQ_ViewBackpack2));
     }
     g_inventoryDirty.store(true);
 }
@@ -1621,10 +1866,18 @@ bool ParseShopEntryName(TFCPacket *msg, std::string *outName, std::string *outRe
     if (!ReadPacketString(msg, outName)) {
         return false;
     }
+    std::string reqs;
+    if (!ReadPacketString(msg, &reqs)) {
+        return false;
+    }
     if (outReqs) {
-        *outReqs = {};
+        *outReqs = std::move(reqs);
     }
     return true;
+}
+
+bool ParseShopEntryNameOnly(TFCPacket *msg, std::string *outName) {
+    return ReadPacketString(msg, outName);
 }
 
 void HandleBuyItemList(TFCPacket *msg) {
@@ -1692,7 +1945,7 @@ void HandleSellItemList(TFCPacket *msg) {
         msg->Get(&price);
         msg->Get(&maxQty);
         std::string name;
-        ParseShopEntryName(msg, &name, nullptr);
+        ParseShopEntryNameOnly(msg, &name);
         entry.objectId = static_cast<std::int32_t>(itemId);
         entry.appearance = static_cast<std::uint16_t>(appearance);
         entry.price = static_cast<std::uint32_t>(price);
@@ -1747,7 +2000,7 @@ void HandleTrainSkillList(TFCPacket *msg, const bool teach) {
             msg->Get(&maxQty);
             msg->Get(&price);
             std::string name;
-            ParseShopEntryName(msg, &name, nullptr);
+            ParseShopEntryNameOnly(msg, &name);
             entry.name = std::move(name);
             entry.maxQty = static_cast<std::uint32_t>(maxQty);
         }
@@ -2259,13 +2512,19 @@ void HandleDeletePlayerReply(TFCPacket *msg) {
     SendCharacterListRequest();
 }
 
-void ParsePeripheralObjectList(TFCPacket *msg, const bool replaceGroundList) {
-    if (replaceGroundList) {
-        std::lock_guard<std::mutex> lock(g_remoteMutex);
-        g_groundMarkers.clear();
-    }
+void ParsePeripheralObjectList(TFCPacket *msg, const bool replaceGroundList, const bool expectInviewRefresh) {
     unsigned short count = 0;
     msg->Get(reinterpret_cast<short *>(&count));
+    /* Bandes peripheriques = souvent 1 entree ; inview complet (reponse GetNearItems) = dizaines+. */
+    constexpr unsigned short kMinFullInviewEntries = 8;
+    const bool fullRefresh =
+        replaceGroundList || (expectInviewRefresh && count >= kMinFullInviewEntries);
+    const bool expectRefresh = g_expectInviewRefresh.load();
+    if (fullRefresh && expectRefresh) {
+        g_expectInviewRefresh.store(false);
+    }
+    /* Windows : Objects.Add est additif — ne jamais vider le sol sur une reponse GetNearItems
+     * (sinon l'objet pousse en 10004 juste apres une prise coffre est efface avant affichage). */
     unsigned drawn = 0;
     unsigned ground = 0;
     std::unordered_set<std::int32_t> inviewUnitIds;
@@ -2277,7 +2536,8 @@ void ParsePeripheralObjectList(TFCPacket *msg, const bool replaceGroundList) {
         std::uint16_t appearance = 0;
         std::int32_t unitId = 0;
         char hpPercent = 0;
-        if (!ParseUnitInfo(msg, &appearance, &unitId, &hpPercent)) {
+        char friendStatus = kT4CVolCannotTalk;
+        if (!ParseUnitInfo(msg, &appearance, &unitId, &hpPercent, &friendStatus)) {
             break;
         }
         appearance = NormalizeServerAppearance(appearance);
@@ -2299,11 +2559,11 @@ void ParsePeripheralObjectList(TFCPacket *msg, const bool replaceGroundList) {
                     inviewUnitIds.insert(unitId);
                 }
                 QueueRemoteSpawn(static_cast<unsigned>(sx), static_cast<unsigned>(sy), appearance, unitId,
-                                 hpPercent);
+                                 hpPercent, friendStatus);
             }
         }
     }
-    if (replaceGroundList && count > 0) {
+    if (fullRefresh && count > 0) {
         std::vector<std::int32_t> stale;
         {
             std::lock_guard<std::mutex> lock(g_remoteMutex);
@@ -2370,13 +2630,8 @@ void HandleObjectAppearedList(TFCPacket *msg) {
         return;
     }
     SkipOpcode(msg);
-    /* IMPORTANT : l'inview complet (reponse a GetNearItems 60) ET les bandes peripheriques poussees
-     * a chaque deplacement (Character.cpp packet_peripheral_units) arrivent tous deux en opcode 16,
-     * impossibles a distinguer. On traite donc TOUJOURS en additif (jamais de purge) : les retraits
-     * passent par l'opcode 11 (BCObjectRemoved) + le cull par distance cote rendu. Purger ici sur une
-     * bande d'1 entree effacait tout le sol (ex. porte qui disparait). */
-    g_expectInviewRefresh.store(false);
-    ParsePeripheralObjectList(msg, false);
+    /* Bandes peripheriques (1 entree) : additive — ne pas consommer g_expectInviewRefresh ici. */
+    ParsePeripheralObjectList(msg, false, g_expectInviewRefresh.load());
 }
 
 void HandleGetNearItemsReply(TFCPacket *msg) {
@@ -2384,12 +2639,15 @@ void HandleGetNearItemsReply(TFCPacket *msg) {
         return;
     }
     SkipOpcode(msg);
-    g_expectInviewRefresh.store(false);
+    const bool expectRefresh = g_expectInviewRefresh.load();
     if (msg->isEnd()) {
+        if (expectRefresh) {
+            g_expectInviewRefresh.store(false);
+        }
         T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase, "[PHASE] RQ_GetNearItems (60) vide");
         return;
     }
-    ParsePeripheralObjectList(msg, false);
+    ParsePeripheralObjectList(msg, false, expectRefresh);
 }
 
 void HandleRemoteMove(TFCPacket *msg, const std::uint16_t moveOpcode) {
@@ -2403,15 +2661,14 @@ void HandleRemoteMove(TFCPacket *msg, const std::uint16_t moveOpcode) {
     msg->Get(&sy);
     std::uint16_t appearance = 0;
     std::int32_t unitId = 0;
-    if (!ParseUnitInfo(msg, &appearance, &unitId, nullptr)) {
+    if (!ParseUnitInfo(msg, &appearance, &unitId, nullptr, nullptr)) {
         return;
     }
     if (sx < 0 || sy < 0) {
         return;
     }
     appearance = NormalizeServerAppearance(appearance);
-    if (IsLocalPlayerUnitId(unitId) ||
-        (unitId == 0 && IsLocalPlayerMoveTarget(static_cast<int>(sx), static_cast<int>(sy)))) {
+    if (IsLocalPlayerMoveTarget(static_cast<int>(sx), static_cast<int>(sy), unitId)) {
         T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase, "[PHASE] <- move ack @ %d,%d (op=%u unit=%ld)",
                                static_cast<int>(sx), static_cast<int>(sy),
                                static_cast<unsigned>(moveOpcode), static_cast<long>(unitId));
@@ -2490,6 +2747,11 @@ void HandlePuppetInformation(TFCPacket *msg) {
         stored.known = true;
         g_pendingPuppetRequest.erase(unitId);
     }
+    T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase,
+                           "[PHASE] <- puppet info (68) id=%ld body=%d legs=%d feet=%d helm=%d wR=%d cape=%d",
+                           static_cast<long>(unitId), static_cast<int>(body), static_cast<int>(legs),
+                           static_cast<int>(feet), static_cast<int>(helm), static_cast<int>(wRight),
+                           static_cast<int>(cape));
 }
 
 /* RQ_GetUnitName (35) : long id, short len + nom, short len + guilde, ulong couleur,
@@ -2542,7 +2804,9 @@ void HandleUnitUpdate(TFCPacket *msg) {
     std::uint16_t appearance = 0;
     std::int32_t unitId = 0;
     char hpPercent = 0;
-    if (!ParseUnitInfo(msg, &appearance, &unitId, &hpPercent) || IsLocalPlayerUnitId(unitId)) {
+    char friendStatus = kT4CVolCannotTalk;
+    if (!ParseUnitInfo(msg, &appearance, &unitId, &hpPercent, &friendStatus) || IsLocalPlayerUnitId(unitId) ||
+        IsRemoteUnitDying(unitId)) {
         return;
     }
     RememberRemoteAppearance(unitId, appearance);
@@ -2551,10 +2815,14 @@ void HandleUnitUpdate(TFCPacket *msg) {
     ev.unitId = unitId;
     ev.appearance = appearance;
     ev.hpPercent = hpPercent;
+    ev.friendStatus = friendStatus;
     PushRemoteEvent(ev);
 }
 
 void HandleMissingUnit(TFCPacket *msg) {
+    if (!WorldSessionReceiving()) {
+        return;
+    }
     SkipOpcode(msg);
     long unitId = 0;
     short type = 0;
@@ -2562,10 +2830,18 @@ void HandleMissingUnit(TFCPacket *msg) {
     if (!msg->isEnd()) {
         msg->Get(&type);
     }
-    /* Windows Packet.cpp : TYPE==11 = unite disparue ; autres types = requete attaque / refresh. */
+    /* Windows Packet.cpp RQ_MissingUnit : TYPE==11 = Delete ; TYPE==24 = attaque sur mort ;
+     * sinon SetMissing (ignore si deja connu — evite doublon 10004). */
     if (type == 11) {
         RemoveGroundMarker(static_cast<std::int32_t>(unitId));
         QueueRemoteRemove(static_cast<std::int32_t>(unitId));
+        return;
+    }
+    if (IsRemoteUnitDying(static_cast<std::int32_t>(unitId))) {
+        return;
+    }
+    if (IsRemoteUnitTracked(static_cast<std::int32_t>(unitId))) {
+        return;
     }
 }
 
@@ -2587,8 +2863,8 @@ void HandleObjectRemoved(TFCPacket *msg) {
                            static_cast<long>(unitId));
 }
 
-/* Serveur __EVENT_OBJECT_CHANGED (opcode 12) : short type + long ID + long dead. Mort d'une
- * creature : on retire l'unite vivante (le cadavre reviendra comme objet sol via GetNearItems). */
+/* Serveur __EVENT_OBJECT_CHANGED (opcode 12) : short type + long ID + long dead.
+ * Creature morte : ChangeType Windows (Killed + cadavre), pas retrait immediat. */
 void HandleObjectChanged(TFCPacket *msg) {
     if (!WorldSessionReceiving()) {
         return;
@@ -2600,6 +2876,18 @@ void HandleObjectChanged(TFCPacket *msg) {
     msg->Get(&objectType);
     msg->Get(&unitId);
     msg->Get(&dead);
+    const std::uint16_t normalizedType = T4CNormalizeDepositObjectType(static_cast<std::uint16_t>(objectType));
+    T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase,
+                           "[PHASE] <- opcode 12 brut id=%ld type=%u norm=%u dead=%ld",
+                           static_cast<long>(unitId), static_cast<unsigned>(static_cast<std::uint16_t>(objectType)),
+                           static_cast<unsigned>(normalizedType), static_cast<long>(dead));
+    if (T4CIsCreatureCorpseAppearance(normalizedType)) {
+        QueueRemoteDie(static_cast<std::int32_t>(unitId), normalizedType);
+        T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase,
+                               "[PHASE] <- creature morte (12) id=%ld cadavre=%u", static_cast<long>(unitId),
+                               static_cast<unsigned>(normalizedType));
+        return;
+    }
     if (dead != 0) {
         QueueRemoteRemove(static_cast<std::int32_t>(unitId));
         return;
@@ -2626,7 +2914,8 @@ void HandlePacketPopup(TFCPacket *msg) {
     std::uint16_t appearance = 0;
     std::int32_t unitId = 0;
     char hpPercent = 0;
-    if (!ParseUnitInfo(msg, &appearance, &unitId, &hpPercent)) {
+    char friendStatus = kT4CVolCannotTalk;
+    if (!ParseUnitInfo(msg, &appearance, &unitId, &hpPercent, &friendStatus)) {
         return;
     }
     if (sx < 0 || sy < 0) {
@@ -2634,6 +2923,16 @@ void HandlePacketPopup(TFCPacket *msg) {
     }
     const unsigned ux = static_cast<unsigned>(sx);
     const unsigned uy = static_cast<unsigned>(sy);
+    appearance = NormalizeServerAppearance(appearance);
+
+    /* Windows Packet.cpp case 10004 : Objects.Add(TYPE) — sol (<10001) ou unite. */
+    if (IsGroundWorldObject(appearance)) {
+        UpsertGroundMarker(ux, uy, appearance, unitId);
+        T4CNetworkDebugLogKind(T4CMatrixLogKind::Phase,
+                               "[PHASE] <- add sol (10004) id=%ld app=%u @ %u,%u", static_cast<long>(unitId),
+                               static_cast<unsigned>(appearance), ux, uy);
+        return;
+    }
 
     if (IsLocalPlayerUnitId(unitId)) {
         std::lock_guard<std::mutex> lock(g_activeMutex);
@@ -2684,7 +2983,7 @@ void HandlePacketPopup(TFCPacket *msg) {
             return;
         }
     }
-    QueueRemoteSpawn(ux, uy, appearance, unitId, hpPercent);
+    QueueRemoteSpawn(ux, uy, appearance, unitId, hpPercent, friendStatus);
 }
 
 void ParseGetStatusPacket(TFCPacket *msg) {
@@ -3076,6 +3375,18 @@ void T4CLoginSessionHandlePacket(TFCPacket *msg) {
             break;
         case RQ_SendTeachSkillList:
             HandleTrainSkillList(msg, true);
+            break;
+        case RQ_ShowChestNew:
+            HandleShowChestNew(msg);
+            break;
+        case RQ_HideChestNew:
+            HandleHideChestNew(msg);
+            break;
+        case RQ_ChestNewContents:
+            HandleChestNewContents(msg);
+            break;
+        case RQ_SpellEffect:
+            HandleSpellEffect(msg);
             break;
         case RQ_FromPreInGameToInGame: {
             SkipOpcode(msg);
@@ -3792,7 +4103,8 @@ bool T4CLoginSessionRequestSpellList() {
 }
 
 bool T4CLoginSessionRequestViewBackpack() {
-    SendOpcodeOnly(static_cast<short>(RQ_ViewInv));
+    /* Parite Windows (V3_ChestDlg, packethandling entree monde) : 154 declenche RQ_ViewBackpack2. */
+    SendOpcodeOnly(static_cast<short>(RQ_ViewBackpack2));
     return true;
 }
 
@@ -3828,6 +4140,19 @@ bool T4CLoginSessionConsumePlayerTeleport(T4CPlayerTeleport *outTeleport) {
 
 bool T4CLoginSessionIsWorldSessionReady() {
     return IsWorldSessionReady();
+}
+
+void T4CLoginSessionSubmitWorldLoadComplete() {
+    if (g_inGame.load() && g_fromPreInGameResult.load() >= 0) {
+        return;
+    }
+    if (g_waitingFromPreInGame.load() || g_deferredEnterWorld46.exchange(false)) {
+        SendPostEnterWorldPackets();
+    }
+}
+
+void T4CLoginSessionSubmitTeleportResync() {
+    NotifyPlayerTeleportResync();
 }
 
 bool T4CLoginSessionRequestNearItems() {
@@ -3883,6 +4208,43 @@ bool T4CLoginSessionSendDirectedTalk(const unsigned int targetX, const unsigned 
     p << static_cast<long>(0);
     p << static_cast<long>(g_sessionKey);
     p << static_cast<short>(0);
+    SendPacket(p);
+    return true;
+}
+
+bool T4CLoginSessionSendDirectedTalkMessage(const std::string &text) {
+    if (!g_inGame.load() || text.empty()) {
+        return false;
+    }
+    T4CTalkState talk{};
+    T4CLoginSessionGetTalkState(&talk);
+    if (!talk.active || talk.unitId == 0) {
+        return false;
+    }
+    T4CActivePlayer active{};
+    T4CLoginSessionGetActivePlayer(&active);
+    int direction = 1;
+    if (active.valid) {
+        const int dx = static_cast<int>(talk.x) - static_cast<int>(active.serverX);
+        const int dy = static_cast<int>(talk.y) - static_cast<int>(active.serverY);
+        direction = T4CDirectionFromWorldDelta(dx, dy);
+        if (direction <= 0) {
+            direction = 1;
+        }
+    }
+    const short textLen = static_cast<short>(std::min<std::size_t>(text.size(), 255));
+    TFCPacket p;
+    p << static_cast<short>(RQ_DirectedTalk);
+    p << static_cast<short>(talk.x);
+    p << static_cast<short>(talk.y);
+    p << static_cast<long>(talk.unitId);
+    p << static_cast<char>(direction);
+    p << static_cast<long>(0);
+    p << static_cast<long>(g_sessionKey);
+    p << textLen;
+    for (short i = 0; i < textLen; ++i) {
+        p << static_cast<char>(text[static_cast<std::size_t>(i)]);
+    }
     SendPacket(p);
     return true;
 }
@@ -3975,6 +4337,58 @@ void T4CLoginSessionCloseShop() {
     std::lock_guard<std::mutex> lock(g_talkMutex);
     g_shopList = {};
     g_shopDirty.store(false);
+}
+
+bool T4CLoginSessionConsumeChestList(T4CChestList *outChest) {
+    if (!g_chestDirty.exchange(false)) {
+        return false;
+    }
+    if (outChest) {
+        std::lock_guard<std::mutex> lock(g_talkMutex);
+        *outChest = g_chestList;
+    }
+    return true;
+}
+
+void T4CLoginSessionGetChestList(T4CChestList *outChest) {
+    if (!outChest) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(g_talkMutex);
+    *outChest = g_chestList;
+}
+
+void T4CLoginSessionCloseChest() {
+    std::lock_guard<std::mutex> lock(g_talkMutex);
+    g_chestList = {};
+    g_chestDirty.store(false);
+}
+
+bool T4CLoginSessionSendChestTakeItem(const std::int32_t itemId, const std::uint32_t qty) {
+    if (!g_inGame.load() || itemId == 0 || qty == 0) {
+        return false;
+    }
+    TFCPacket p;
+    p << static_cast<short>(RQ_ChestRemoveItemToBackpack);
+    p << static_cast<long>(itemId);
+    p << static_cast<long>(qty);
+    SendPacket(p);
+    return true;
+}
+
+bool T4CLoginSessionConsumeLocalCast(unsigned *targetX, unsigned *targetY) {
+    std::lock_guard<std::mutex> lock(g_localCastMutex);
+    if (!g_localCastPending) {
+        return false;
+    }
+    g_localCastPending = false;
+    if (targetX) {
+        *targetX = g_localCastTargetX;
+    }
+    if (targetY) {
+        *targetY = g_localCastTargetY;
+    }
+    return true;
 }
 
 bool T4CLoginSessionSendUseObject(const unsigned int targetX, const unsigned int targetY,
@@ -4435,6 +4849,22 @@ void T4CLoginSessionClearRemoteUnits() {
     g_pendingPuppetRequest.clear();
     g_unitNames.clear();
     g_pendingUnitName.clear();
+    g_dyingUnits.clear();
+}
+
+void T4CLoginSessionFinalizeRemoteUnitDeath(const std::int32_t unitId) {
+    if (unitId == 0) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(g_remoteMutex);
+    g_dyingUnits.erase(unitId);
+    g_remoteAppearance.erase(unitId);
+    g_remotePuppet.erase(unitId);
+    g_pendingPuppetRequest.erase(unitId);
+}
+
+bool T4CLoginSessionIsRemoteUnitDying(const std::int32_t unitId) {
+    return IsRemoteUnitDying(unitId);
 }
 
 void T4CLoginSessionCopyGroundObjectMarkers(std::vector<T4CGroundObjectMarker> *outMarkers) {

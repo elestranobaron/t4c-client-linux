@@ -273,6 +273,12 @@ bool T4CLoginSessionConsumePlayerTeleport(T4CPlayerTeleport *outTeleport);
 /** True une fois opcode 46 OK (in_game cote client). */
 bool T4CLoginSessionIsWorldSessionReady();
 
+/** Fin chargement assets : envoie l'opcode 46 differe (entree monde initiale). */
+void T4CLoginSessionSubmitWorldLoadComplete();
+
+/** Fin reload carte apres teleport : envoie l'opcode 46 differe. */
+void T4CLoginSessionSubmitTeleportResync();
+
 /** Demande les unites peripheriques (RQ_GetNearItems 60 → reponse serveur opcode 16). */
 bool T4CLoginSessionRequestNearItems();
 
@@ -285,6 +291,9 @@ bool T4CLoginSessionSendAttack(unsigned int targetX, unsigned int targetY, std::
 /** Parler a un PNJ (opcode 30 RQ_DirectedTalk). */
 bool T4CLoginSessionSendDirectedTalk(unsigned int targetX, unsigned int targetY, std::int32_t targetUnitId,
                                      int direction);
+
+/** Reponse texte en conversation PNJ active (opcode 30 + message, miroir main2.cpp). */
+bool T4CLoginSessionSendDirectedTalkMessage(const std::string &text);
 
 /** Option dialogue / lien [Buy] (opcode 50 RQ_DirectedTalkNoFeed). */
 bool T4CLoginSessionSendDirectedTalkLink(const std::string &linkText);
@@ -301,6 +310,13 @@ bool T4CLoginSessionConsumeNpcSpeech(T4CNpcSpeech *outSpeech);
 bool T4CLoginSessionConsumeShopList(T4CShopList *outShop);
 void T4CLoginSessionGetShopList(T4CShopList *outShop);
 void T4CLoginSessionCloseShop();
+
+/** Coffre au sol (opcodes 220/221/222). */
+bool T4CLoginSessionConsumeChestList(T4CChestList *outChest);
+void T4CLoginSessionGetChestList(T4CChestList *outChest);
+void T4CLoginSessionCloseChest();
+/** Prendre un objet du coffre → sac (opcode 108). */
+bool T4CLoginSessionSendChestTakeItem(std::int32_t itemId, std::uint32_t qty);
 
 /** Utilise un objet / porte / portail (opcode 23 RQ_UseObject). */
 bool T4CLoginSessionSendUseObject(unsigned int targetX, unsigned int targetY, std::int32_t unitId);
@@ -403,6 +419,12 @@ bool T4CLoginSessionConsumeLocalPlayerMove(unsigned int *outX, unsigned int *out
 /** Met a jour les coords affichees du perso actif (apres mouvement local). */
 void T4CLoginSessionUpdateActivePlayerPosition(unsigned int x, unsigned int y);
 
+/** Volatile / Friendly du paquet unite (VisualObjectList.h VOL_* / STATUS TFCAddObject). */
+constexpr char kT4CVolCannotTalk = 0;  /* monstre — curseur COMBAT */
+constexpr char kT4CVolCanTalk = 1;     /* PNJ — curseur TALK */
+constexpr char kT4CVolIsPlayer = 2;
+constexpr char kT4CVolIsMinions = 3;
+
 /** Evenement reseau → rendu : spawn / deplacement / maj stats / despawn d'une unite distante. */
 enum class T4CRemoteUnitEventKind : std::uint8_t {
     Spawn,
@@ -411,6 +433,8 @@ enum class T4CRemoteUnitEventKind : std::uint8_t {
     Remove,
     /** Opcode 10001 : anim attaque ('A') vers (x,y) = cible. */
     Attack,
+    /** Opcode 12 (RQ_DepositObject) : creature morte → cadavre (VisualObjectList::ChangeType). */
+    Die,
 };
 
 struct T4CRemoteUnitEvent {
@@ -420,12 +444,16 @@ struct T4CRemoteUnitEvent {
     unsigned int x{0};
     unsigned int y{0};
     char hpPercent{0};
+    /** STATUS serveur (Friend Add) : kT4CVolCanTalk vs kT4CVolCannotTalk. */
+    char friendStatus{kT4CVolCannotTalk};
     /** Opcode deplacement 1–8 si connu (TFCMoveID) — direction visuelle. */
     std::uint16_t moveOpcode{0};
     /** Cible attaque (opcode 10001) — direction StAtt vers (targetX, targetY). */
     unsigned int targetX{0};
     unsigned int targetY{0};
     bool hasAttackTarget{false};
+    /** Snap displayX/Y = server (Packet.cpp 10001 MoveObject — evite clone combat). */
+    bool snapDisplay{false};
 };
 
 /** Marqueur objet sol (portes/coffres/objets) extrait des opcodes 16/1. */
@@ -460,6 +488,13 @@ bool T4CLoginSessionShouldSkipRemoteUnit(std::uint16_t appearance, std::int32_t 
 
 /** Reinitialise la file (logout, teleport, retour login). */
 void T4CLoginSessionClearRemoteUnits();
+
+/** Fin de sequence mort (cadavre expire localement) : evite un respawn GetNearItems fantome. */
+void T4CLoginSessionFinalizeRemoteUnitDeath(std::int32_t unitId);
+
+/** True si l'unite est en sequence de mort (opcode 12 / hp=0) — bloque respawn et attaques fantomes. */
+bool T4CLoginSessionIsRemoteUnitDying(std::int32_t unitId);
+
 void T4CLoginSessionCopyGroundObjectMarkers(std::vector<T4CGroundObjectMarker> *outMarkers);
 
 /** Texte de degats flottant (opcode 124/125). */
@@ -474,6 +509,9 @@ bool T4CLoginSessionConsumePlayerDeath();
 
 /** Attaque locale (le joueur frappe) : true une seule fois par swing, coords du defenseur. */
 bool T4CLoginSessionConsumeLocalAttack(unsigned *targetX, unsigned *targetY);
+
+/** Animation de lancer de sort locale (opcode 64, lanceur = joueur). */
+bool T4CLoginSessionConsumeLocalCast(unsigned *targetX, unsigned *targetY);
 
 /** Demande le nom reel d'une unite (RQ_GetUnitName 35) — dedupliquee/cachee. */
 void T4CLoginSessionRequestUnitName(std::int32_t unitId, unsigned int x, unsigned int y);
