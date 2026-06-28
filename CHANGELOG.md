@@ -7,6 +7,452 @@ Familles : **Décision**, **Assets**, **Build**, **Réseau**, **Rendu**, **Serve
 
 ---
 
+## 2026-06-28 07:29:00 — FIX MAJEUR : troncature de l'ID d'unité sur les moves (PNJ figés, doublons, cadavre fantôme)
+
+**Famille : Réseau / Rendu — cause racine d'un bug ancien et difficile**
+
+### Symptômes (longue date)
+- Les PNJ / monstres **ne se déplaçaient pas** à l'écran (semblaient figés ou ne bougeaient que par à-coups de combat).
+- **Dédoublement** d'une créature dès le premier coup.
+- À la mort : le **skin restait visible et s'animait au survol** au lieu de disparaître.
+
+### Cause racine
+`QueueRemoteMove(...)` déclarait son paramètre `unitId` en **`std::uint16_t`**, alors que les
+IDs serveur sont sur **32 bits**. Chaque move distant voyait donc son ID **tronqué à 16 bits**
+(`1052167 & 0xFFFF = 3591`, `1051820 & 0xFFFF = 3244`, …). Conséquence : le client maintenait
+**deux unités par créature** :
+- l'unité **réelle** (ID complet) — spawn, attaque, et **mort** corrects (le cadavre s'affiche bien) ;
+- une unité **fantôme** (ID tronqué) qui recevait **tous les déplacements** mais n'était **jamais
+  tuée** (aucun paquet de mort ne référence l'ID tronqué) → elle continuait à marcher, s'animer et
+  restait sélectionnable indéfiniment.
+
+Diagnostic obtenu via logs `[DIAG]` temporaires : les `move QUEUE id=3591` ne correspondaient
+jamais aux `attaque/mort id=1052167` — preuve directe de la troncature.
+
+### Correctif
+- **`QueueRemoteMove`** : paramètre `unitId` passé de `std::uint16_t` → **`std::int32_t`**.
+  Les moves, spawns, attaques et morts partagent désormais le **même ID 32 bits** → une seule
+  unité par créature, qui se déplace, meurt et disparaît correctement.
+
+### Rendu — contour cible
+- **Contour de la cible sélectionnée** : couleur passée de bleu `(100,220,255)` → **blanc**
+  (`CL_WHITE`), fidèle à Windows (`VisualObjectList.cpp` `dwOutlineColor = CL_WHITE`). Le contour
+  reste limité à l'unité **sélectionnée** (comportement `TargetDlg`), inchangé par ailleurs.
+
+### Vérifications
+- Build propre, **105/105** tests de régression OK.
+- Aucune régression vs dernier push (le fix corrige le routage d'ID, sans toucher au reste).
+
+---
+
+## 2026-06-28 05:00:00 — FIX dedoublement monstres : MoveObject combat + mort Windows
+
+**Famille : Réseau / Rendu — fidelite VisualObjectList.cpp + Packet.cpp 10001**
+
+### Cause dedoublement (1er coup / mort)
+- Windows repositionne **attaquant ET defenseur** sur AXPos/DXPos a chaque `10001` (`MoveObject`).
+- Linux ne bougeait que l'attaquant → monstre fige a l'ancienne tuile + combat a la nouvelle = **clone**.
+- Mort : Windows garde le sprite **vivant 500 ms** (`Killed`) puis bascule `KillType` ; Linux affichait cadavre + vivant.
+
+### Correctifs
+1. **`QueueRemoteCombatSnap`** : snap display+serveur sur les deux IDs a chaque attaque (10001/10002).
+2. **`beginDeath`** : `showCorpse=false` 500 ms (kT4CDyingPhaseMs), snap display a la mort.
+3. **`HandleMissingUnit`** : ignore si unite deja tracée / mourante (evite doublon opcode 71).
+4. **`kT4CNpcWalkAnimFrames=6`** : Rat n'a que a–f (plus de `Rat180-g` / frame fantome).
+
+---
+
+## 2026-06-28 04:15:00 — FIX puppet COMP_NULL + preload WarrioStMov
+
+**Famille : Rendu**
+
+- **`COMP_NULL` (type 3)** : frames vides Windows (ex. `PupNakedHandR045-h`) — plus de `decode KO`.
+- **Preload joueur** : plus de StMov / nom nu / cadavre `WarrioC-*` au chargement monde.
+- **Puppet `drawLayer`** : plus de fallback sur nom nu (`PupNakedHandL`) ; repli frame 0 si frame courante vide.
+
+---
+
+## 2026-06-28 04:00:00 — FIX rendu creatures : StMov supprimé, marche 8 frames (Bat)
+
+**Famille : Rendu — cause visible « aucun changement » malgré binaire à jour**
+
+### Diagnostic (logs utilisateur)
+- Le binaire récent tournait bien (`preload bloquant : 986 sprites (creatures a la demande au spawn)`).
+- Les monstres restaient invisibles / points colorés : le client cherchait des sprites **inexistants**
+  dans `V2DataI.did` (`BatStMov*`, bare `Bat`, frame `Bat045-i` = 9e frame alors que Bat n'a que a–h).
+- `drawUnitSprite KO … sprite=Bat` = échec après frame 8 du cycle marche.
+
+### Correctifs
+1. **`tryDrawNpcBase` / `tryDrawNpcOutline`** : plus de lookup StMov ni fallback sur le nom nu ;
+   pose statique = frame 0 du cycle marche ; clamp 8 frames (`kT4CNpcWalkAnimFrames`).
+2. **`T4CWalkAnimNextNpcFrame`** pour les unités distantes (mod 8, pas 9).
+3. **Preload minimal** : plus de `appendUnique(base)` seul (évite `index absent 'Bat'`).
+4. **Joueur classe NPC** : plus de StMov idle (`WarrioStMov*` absent du `.did`).
+
+---
+
+## 2026-06-28 03:30:00 — FIX mort/clone : attaques fantômes + tempête preload StMov
+
+**Famille : Réseau / Rendu — bugs visibles dans les logs utilisateur**
+
+### Symptômes (logs)
+- Après `opcode 12` (mort), le serveur envoie encore `att=1052061` — le client recréait l'unité
+  morte via `Attack`/`Update` si absente de `remoteUnits_` (seul `unit.dying` local bloquait).
+- Milliers de `WARNING: [SpriteAtlas] index absent 'XXXStMov045-a'` — preload différé de
+  **toute** la table creatures avec frames idle inexistantes dans le `.did`.
+
+### Correctifs
+1. **`T4CLoginSessionIsRemoteUnitDying()`** exporté ; `syncRemoteUnitsFromNetwork()` ignore
+   Spawn/Move/Update/Attack pour les ids dans `g_dyingUnits`.
+2. **`HandleAttackResult`** : `hpPercent <= 0` → `QueueRemoteDie()` immédiat (avant opcode 12) ;
+   attaques/missing-unit ignorées si attaquant ou défenseur déjà mourant.
+3. **Preload** : suppression du preload différé massif (`T4CCollectCreaturePreloadBases`) ;
+   preload minimal à la demande au 1er spawn (`T4CAppendUnitSpritePreloadMinimal`).
+
+---
+
+## 2026-06-23 06:15:00 — FIX audit corruptions Composer : contour fantôme, picking morts, snap GetNearItems
+
+**Famille : Rendu / Réseau — corrections issues de l'audit git diff**
+
+### Contour bleu / fantôme invisible au survol
+- `drawUnitOutline()` : plus de repli sur le sprite **vivant** quand le cadavre n'a pas de sprite
+  (cause du « double » / ombre bleue animée à la souris après la mort).
+- Suppression du fallback robe blanche `body=425` dans le contour (incohérent avec `KnownPuppet`
+  invisible dans `drawUnitSprite`).
+- Suppression du rectangle bleu `(100,220,255)` de secours (invention Composer).
+- Contour réservé à la **cible sélectionnée** (`V3_TargetDlg`), plus au survol souris.
+
+### Picking / sélection
+- `isRemoteUnitSelectable()` : unités `dying`, `showCorpse`, puppets sans dress → non
+  sélectionnables ni survolables (`pickUnitAtScreen`).
+
+### Déplacement PNJ (régression snap GetNearItems)
+- `syncRemoteUnitsFromNetwork()` : restauration du snap immédiat sur `Spawn` ou `|dx|>3`
+  (GetNearItems / bande périphérique), comme au dernier commit.
+- Interpolation « retard max 1 tuile » conservée **uniquement** pour les moves UDP 1–8
+  (petit delta), conforme `VisualObjectList.cpp:15011`.
+
+---
+
+## 2026-06-23 05:30:00 — RÉGRESSION CRITIQUE : NPC immobiles (« surplace » + repositionnement seulement à l'entrée de zone)
+
+**Famille : Réseau — correction d'une régression non commitée, non documentée**
+
+### Symptôme
+La plupart des NPC (sauf gardes d'Olin Haad et certaines unités, ex. « les femmes ») ne se
+déplaçaient plus : animation de marche « sur place » puis téléport, position mise à jour
+uniquement à l'entrée/sortie de zone (GetNearItems). Au dernier commit le déplacement
+fonctionnait → régression introduite dans les changements non commités.
+
+### Cause racine
+`NormalizeServerAppearance()` (`T4CLoginSession.cpp`) contenait un ajout fautif :
+
+```cpp
+case 0:
+    return 274;   // <-- ABERRANT : 274 = id sprite corps (dress), pas une apparence d'unité
+```
+
+Or le paquet de move Windows (`Packet.cpp` `TFCMoveID` → `Objects.MoveObject(ID, X, Y, …, TYPE, …)`)
+envoie `TYPE = 0` pour signifier « pas de changement d'apparence : garde celle de l'objet existant ».
+Conséquence du remap fautif : un move avec `TYPE = 0` devenait `appearance = 274`, ce qui :
+1. **empoisonnait** l'apparence mémorisée (`RememberRemoteAppearance` → 274),
+2. faisait **tomber le move** dans `QueueRemoteMove` (`IsRemoteDrawableUnit(274) == false` car 274 < 10001).
+
+Résultat : les moves UDP par tuile étaient ignorés ; seules les annonces périodiques GetNearItems
+repositionnaient l'unité (« téléport »), d'où le « surplace ».
+
+### Correctif
+Suppression du `case 0: return 274;`. `TYPE/appearance == 0` reste désormais `0`, donc
+`QueueRemoteMove` retombe sur l'apparence réelle mémorisée (`g_remoteAppearance`) et applique le move,
+exactement comme `MoveObject` côté Windows conserve le type de l'objet existant.
+
+---
+
+## 2026-06-23 03:40:00 — INVESTIGATION PNJ « robe blanche » + clone mort + marche/téléport (référence : client Windows d'origine)
+
+**Famille : Rendu / Réseau — comportements alignés EXACTEMENT sur `client/T4C Client/`**
+
+### Contexte
+Trois symptômes signalés : (1) « PNJ en robe blanche » nommés « PNJ » partout dans Lighthaven
+alors qu'il ne devrait y avoir que 2 NPC (Shovanis, Nevanis) ; (2) monstre tué laisse un
+« clone » figé sur place ; (3) une unité « marche sur place puis se téléporte ailleurs ».
+Décision : ne plus supposer, mais **lire le code d'origine comme spec authoritative**.
+
+### Constat n°1 — Puppets non habillés = INVISIBLES dans l'original (preuve source)
+- `ObjectListing.h` : `10011 = __PLAYER_HUMAN_PUPPET` (un **autre joueur**, pas un NPC),
+  `10012 = __PLAYER_HUMAN_FEMALE`. Les vrais NPC humains sont `10005–10010`.
+- `VisualObjectList.cpp:9775` : à la création, `Object->KnownPuppet = FALSE`.
+- `VisualObjectList.cpp:22617` : `KnownPuppet = TRUE` **uniquement** à la réception de
+  l'équipement (`RQ_PuppetInformation` → `Puppetize(...)`), keyé par `if (Object->ID == ID)`.
+- `VisualObjectList.cpp:15734, 17062, 17380, 21364` (4 passes de rendu) :
+  `if (!((Type==__PLAYER_HUMAN_PUPPET || Type==__PLAYER_HUMAN_FEMALE) && !KnownPuppet))`
+  → un puppet dont l'équipement n'est pas encore reçu **n'est PAS dessiné**.
+- **Conclusion** : les « PNJ robe blanche » étaient des puppets joueurs pas encore habillés.
+  L'original les rend invisibles jusqu'à réception de l'équipement ; nous les dessinions en
+  fallback robe blanche (`body=425`) avec le label « PNJ ».
+
+### Constat n°2 — Pas de doublon possible par personne dans l'original
+- `VisualObjectList.cpp:9649 Add(...)` : dédoublonnage par **ID** (`if (GetObject()->ID == ID)
+  { AlreadyHere = true; return; }`, ligne 9673). L'habillage se fait **sur le même objet**.
+- Donc une personne = **un seul objet par ID**, jamais « un robe blanche + un habillé ».
+  Chez nous `remoteUnits_` est aussi keyé par `unitId` : un doublon n'est possible que si le
+  serveur émet **deux ID distincts** pour la même entité (cas où l'original dupliquerait aussi).
+
+### Constat n°3 — Modèle de déplacement de l'original (anti « marche sur place + téléport »)
+- `VisualObjectList.cpp:15011` (Move2, `D->Type==0`) : à la réception d'un move, la position
+  **logique** saute immédiatement à la tuile cible (`AbsX/OX = NewX`) ; seul un décalage
+  **visuel d'au plus UNE tuile** glisse pour rattraper (`Object->MovX = (OX-newOX)*32`,
+  résorbé frame par frame par `SpeedX/SpeedY`). Le retard visuel ne dépasse donc jamais 1 tuile.
+- Notre code lerpait `displayX → serverX` sans borne et ne « snappait » qu'au-delà de **3 tuiles**
+  → en cas de paquets UDP perdus, l'unité accumulait du retard (animation de marche sans
+  déplacement visible = « sur place ») puis sautait (« téléport ») au prochain gros écart.
+
+### Corrections appliquées (`src/`)
+- `GameWorldScreen.cpp` `drawUnitSprite()` : un puppet (`10011/10012/15011/15012`) sans
+  équipement reçu (`T4CLoginSessionGetRemotePuppetDress` == false) **n'est plus dessiné**
+  (retour `false`) — fini la robe blanche fallback. Conforme à `VisualObjectList.cpp:15734`.
+- `GameWorldScreen.cpp` boucle de rendu : plus de carré/point de fallback pour un puppet
+  invisible non habillé.
+- `GameWorldScreen.cpp` `pickUnitAtScreen()` : un puppet non habillé est **non
+  sélectionnable / non survolable** (cohérent avec « invisible »).
+- `GameWorldScreen.cpp` `tryDrawCorpse()` : suppression du fallback qui dessinait le sprite
+  **vivant** quand le sprite cadavre (`BatC-*`…) est absent de l'atlas — ce fallback créait le
+  « clone figé » du monstre mort. Sans sprite cadavre, le mort disparaît (au lieu de rester
+  affiché vivant).
+- `GameWorldScreen.cpp` `syncRemoteUnitsFromNetwork()` (Spawn/Move/Update/Attack) : retard
+  visuel **borné à 1 tuile** (modèle `VisualObjectList.cpp:15011`). La position logique
+  (`serverX/serverY`) est posée immédiatement ; si l'écart visuel > 1 tuile, `displayX/displayY`
+  est replacé à 1 tuile de la cible dans la direction du déplacement. Plus de téléport >1 tuile,
+  plus d'animation « sur place ».
+
+### À retester côté utilisateur
+- Lighthaven : ne doivent rester que les NPC réellement habillés (Shovanis/Nevanis…) ; les
+  puppets joueurs non habillés sont invisibles tant que leur équipement n'est pas reçu.
+- Mort d'un monstre : plus de clone vivant figé.
+- Déplacement des unités distantes : glissement régulier, sans saut.
+
+### Piste ouverte (non corrigée, à confirmer avec logs)
+- Si un « robe blanche » réapparaît, capturer `id`+`app`+position : vérifier si le serveur
+  émet bien `RQ_PuppetInformation`/opcode 70 pour cet ID (sinon il reste invisible, ce qui est
+  le comportement d'origine), ou s'il s'agit d'un 2e ID distinct pour la même entité.
+
+---
+
+## 2026-06-23 04:50:00 — FIX mort (suppression unité vivante) + surplace PNJ + robes blanches dégagées
+
+**Famille : Rendu — 3 demandes utilisateur explicites**
+
+### 1. Robes blanches « PNJ » — SUPPRIMÉES définitivement
+- `drawUnitSprite()` : un puppet (`10011/10012`) sans équipement reçu (`GetRemotePuppetDress`
+  == false) **n'est plus dessiné** (return false), comme Windows (`VisualObjectList.cpp:15734`,
+  `KnownPuppet==false` → pas de draw). Plus de fallback robe blanche `body=425`.
+- Point de fallback et sélection/survol également désactivés pour ces puppets invisibles.
+
+### 2. Monstres/PNJ qui « marchent sur place » à l'arrêt — CORRIGÉ
+- Cause : pour une unité immobile sans sprite idle `StMov` (beaucoup sont absents de l'atlas,
+  cf. warnings `…StMov…-x absent`), `tryDrawNpcBase()` retombait sur le sprite de **marche**
+  indexé par une frame qui défile → marche immobile. Idem chemin puppet/joueur-NPC.
+- Fix : à l'arrêt (`idleStanding`), on dessine une **pose statique (frame 0)** au lieu de la
+  frame de marche qui défile. Appliqué à `tryDrawNpcBase()`, au chemin puppet et au chemin
+  sprite joueur-NPC.
+
+### 3. Mort d'un monstre : suppression de l'unité vivante (fin du « dédoublement »)
+- Théorie utilisateur confirmée : l'animation de mort doit être séparée et **l'unité vivante
+  doit être supprimée** à l'instant de la mort.
+- Cause du clone : pendant la phase « dying » de 500 ms (`showCorpse == false`), on dessinait
+  encore le **sprite vivant figé** à côté des autres monstres vivants → effet de doublon.
+- Fix : `beginDeath()` passe **directement** à `showCorpse = true` (plus de phase de gel du
+  sprite vivant). Les unités mourantes ne sont rendues que par `tryDrawCorpse()` ; sans sprite
+  cadavre dédié, l'unité **disparaît** (au lieu de laisser un clone vivant). Le son d'agonie
+  est déjà joué sur le coup fatal (`PlayCreatureHitSfx`). Le cadavre disparaît après expiration.
+
+---
+
+## 2026-06-23 03:55:00 — REVERT invisibilité puppet (régression « plus rien ne bouge ») + FIX joueur marche sur place
+
+**Famille : Rendu — stop régression, retour comportement dernier commit**
+
+### Régressions signalées
+1. Le **personnage joueur à l'arrêt** joue une animation de marche **perpétuelle**.
+2. **Tous les personnages distants sauf les gardes d'Olin Haad** ne se déplacent/affichent plus.
+
+### Cause n°1 (joueur marche sur place) — RÉGRESSION corrigée
+- `GameWorldScreen.cpp` rendu joueur : le rendu puppet (`T4CPuppetTryDrawPlayer`) indexe le
+  cycle de **marche** (13 frames) avec `frameIndex` et n'a **pas** de cycle idle séparé. À
+  l'arrêt on lui passait `playerIdleAnimFrame_` (qui défile 0→3 toutes les 150 ms) → marche
+  sur place. Windows : un puppet à l'arrêt garde `SpriteNumber = 1` (statique).
+- **Fix** : à l'arrêt, le puppet joueur utilise la frame **statique 0** (`puppetFrame`), au lieu
+  de la frame idle qui défile. (L'anim idle StMov ne vaut que pour les sprites NPC non-puppet.)
+
+### Cause n°2 (« plus rien ne bouge sauf les gardes ») — REVERT de l'invisibilité puppet
+- Constat : **avant** le changement d'invisibilité, ces puppets étaient TOUS en robe blanche
+  → `dress.known == false` → l'équipement (opcode 68) n'est **jamais appliqué** dans notre
+  client. Donc rendre les puppets non habillés invisibles a transformé « robe blanche qui
+  bouge » en « rien » : seuls les NPC non-puppet (gardes Olin Haad, type 10006) restaient.
+- **Décision** : la bonne cible Windows n'est PAS de cacher, mais d'**habiller** (opcode 68).
+  En attendant, on **annule** les 3 edits d'invisibilité pour stopper la régression :
+  - `drawUnitSprite()` : retour du fallback robe blanche (`body=425`) pour puppet sans dress.
+  - boucle de rendu : retour du point de fallback.
+  - `pickUnitAtScreen()` : retour de la sélection/survol normale.
+- **Conservé** (corrections valides) : joueur idle statique, retard visuel mouvement borné à
+  1 tuile, suppression du fallback sprite vivant pour cadavre absent.
+
+### Diagnostic ajouté
+- `T4CLoginSession.cpp` `HandlePuppetInformation()` : log `[PHASE] <- puppet info (68) id=…
+  body=… legs=… …` à chaque réception d'équipement. **But** : déterminer si le serveur
+  envoie réellement l'opcode 68 pour ces unités. Le parsing (id long, puis body/feet/gloves/
+  helm/legs/wR/wL/cape/hair/tag en short) est **identique** à l'original (`Packet.cpp:3265`).
+
+### Prochaine étape (vraie correction Windows, à valider par le log)
+- Si le log `puppet info (68)` **n'apparaît jamais** pour ces unités → le serveur ne répond
+  pas à notre `RQ_PuppetInformation`, ou l'équipement transite par un autre canal (push inline) :
+  à investiguer côté réception. C'est ÇA la cause racine des robes blanches.
+- Si le log apparaît mais l'unité reste en robe blanche → bug d'application (`g_remotePuppet`
+  / `GetRemotePuppetDress`).
+
+---
+
+## 2026-06-22 08:00:00 — FIX combat, coffres, animation sort
+
+**Famille : Gameplay / Réseau**
+
+- **Attaque** : clic simple sur un monstre (appearance 20000–24999) déclenche l'attaque ; les monstres n'étaient plus traités comme PNJ « à parler ».
+- **Coffres** : clic = `RQ_UseObject` (ouvrir), plus `RQ_GetObject` (ramassage) — corrige le message « encombrement maximal ». Panneau coffre (opcodes 221/220/222) + prise d'objet (108).
+- **Sorts** : opcode 64 `RQ_SpellEffect` oriente le perso + animation de lancer (geste attaque court).
+
+---
+
+## 2026-06-22 06:30:00 — FIX inventaire : sync sac (154) + equiper via paperdoll
+
+**Famille : Réseau / Gameplay**
+
+- **Sync sac** : `RequestViewBackpack` envoie `RQ_ViewBackpack2` (154) au lieu de `RQ_ViewInv` (156) — le client ne recevait pas le sac complet après ramassage.
+- **Ramassage** : opcode 123 (`UpdateBackpackAfterUse`) ajoute l'objet localement s'il est inconnu, puis resync 154.
+- **Equiper** : clic sur un emplacement vide du paperdoll avec un objet sélectionné → `RQ_EquipObject` (21), comme le drag-drop Windows.
+
+---
+
+## 2026-06-22 05:00:00 — FIX dialogue PNJ (retour ligne) + grille achat marchand
+
+**Famille : Rendu / Réseau**
+
+- **Dialogue** : texte PNJ avec retour à la ligne dans le panneau (clip + wrap, jusqu'à 7 lignes) ; panneau agrandi en bas.
+- **Boutique** : parse opcode 41 corrigé — la 2e chaîne `req` par article n'était pas lue (désync paquet → liste vide). Grille centrée type Windows (colonnes Objet/Prix, lignes alternées, compteur d'articles).
+
+---
+
+**Famille : Rendu / Build / Réseau**
+
+**Bandeau defilant** : ticker independant (`T4CScrollingBanner::startTicker`, thread 60 Hz) — defilement fluide pendant le chargement lourd ; UI presentee **avant** le decode sprites (12 ms/frame max).
+
+**Chargement accelere** :
+- Preload bloquant reduit : tuiles viewport + perso local (frame 0) + HUD/curseurs — **sans** preload massif de toutes les creatures ni des 4 classes.
+- Creatures + cycles marche complets : preload **differe en jeu** (`pollDeferredSpritePreload`, 6 ms/frame).
+- `PreloadSpritesForMs` : budget temps par frame au lieu de lots fixes.
+
+**Regression opcode 46** : renvoi immediat apres PutPlayerInGame (13) ; le serveur ne timeout plus. Gameplay (`canMove_`, `ready_`) toujours bloque jusqu'a fin du preload + reponse 46.
+
+---
+
+## 2026-06-22 04:00:00 — FIX entree monde : opcode 46 differe apres chargement assets
+
+**Famille : Réseau / Rendu**
+
+**Symptôme :** le perso est `in_game=1` cote serveur (vulnerable aux PNJ/combat) pendant l'ecran « Chargement du monde… » — le client envoyait l'opcode 46 des la reception du PutPlayerInGame (13), avant la fin du decode sprites/carte.
+
+**Correctif (aligne intention Windows `DoNotMove`) :**
+- `g_deferredEnterWorld46` : opcode 46 envoye uniquement via `T4CLoginSessionSubmitWorldLoadComplete()` a la fin du preload (`finishAssetLoad`).
+- Entree session (`RequestNearItems`, stats, sac…) reportee dans `completeSessionEnter()` apres reponse 46 OK.
+- Teleport (57) : opcode 46 differe aussi (`g_deferredTeleportResync`) jusqu'au reload carte client ; `canMove_` bloque tant que `!IsWorldSessionReady()`.
+- Ecran loading : phase « Connexion au monde… » pendant l'attente 46 post-assets.
+
+---
+
+## 2026-06-22 12:00:00 — Sprint final in-game : T2/T3/T5/T6 (parité Windows)
+
+**Famille : Réseau / Rendu**
+
+Correctifs alignés sur `docs/SPRINT_FINAL.md` (source de vérité = client Windows) :
+
+- **T5 — Chat PNJ** : `sendChatLine` route le texte vers `RQ_DirectedTalk` (30) + message quand `g_talkState.active` (`T4CLoginSessionSendDirectedTalkMessage`, miroir `main2.cpp` L2475–2537). Les mots-clés (`acheter`, `oui`…) atteignent enfin le serveur.
+- **T2 — Coffres↔portes** : remap `_I` → type canonique dans `T4CGroundObjectSprites.cpp` (table `SetMouseCursor` L156–188) avant lookup sprite ; 18/19/20 → coffres au lieu de RockDoor.
+- **T3 — Spawns fantômes** : `g_expectInviewRefresh` consommé sur opcode 16 si count ≥ 8 (inview complet vs bande périphérique) → purge unités/sol hors liste ; `IsLocalPlayerMoveTarget` compare l'`unitId` joueur (ne avale plus les moves PNJ adjacents).
+- **T6 — Anim marche** : préchargement des **9 frames** par angle (`T4CAppendUnitSpritePreload`) au lieu de 0–2 seulement.
+
+Build : `cmake --build build/linux` OK.
+
+---
+
+## 2026-06-22 02:30:00 — DOC : sprint final parité client Linux↔Windows (`docs/SPRINT_FINAL.md`)
+
+**Famille : Doc / Décision**
+
+Préparation du sprint pour l'agent (Composer). Document `docs/SPRINT_FINAL.md` : 9 tâches ancrées dans le code réel (fichiers + fonctions), issues du diagnostic des sous-systèmes rendu/réseau/HUD.
+
+Tâches : T1 sprites « carte verte » (résolution appearance→sprite, ex. Dark Fang dragon ; diagnostic d'abord) · T2 coffres rendus en portes (remap `_I`→type de base 18→41/19→42/20→238, parité `VisualObjectList.cpp`) · T3 spawns fantômes PNJ (purge inview non consommée, `IsLocalPlayerMoveTarget` par tuile) · T4 ombres incohérentes (résolution sprite/fallback puppet) · T5 chat PNJ : phrases tapées ignorées (`sendChatLine` envoie toujours opcode 27 ; doit router DirectedTalk 30+texte si `g_talkState.active`, miroir `main2.cpp`) · T6 anim marche 1–2 frames manquantes (préchargement 0–2 seulement) · T7 objets/inventaire incomplets · T8 HUD incomplet (framework `RootBoxUI`+widgets non porté) · T9 directive : porter Windows→Linux à l'identique (paliers A→E).
+
+Confirmation : **oui**, il faut porter le reste du fonctionnement client Windows sur Linux à l'identique (le Linux ne partage aujourd'hui que la pile réseau).
+
+---
+
+## 2026-06-22 02:17:00 — FIX serveur Linux : sauvegarde du personnage à la déconnexion (position/XP/items)
+
+**Famille : Serveur**
+
+**Symptôme :** à chaque reconnexion, le personnage (`AZERTY`, compte `test`) réapparaissait au spawn (`2944,1059 w=0`) au lieu de sa position de sortie. Sauvegarde de déconnexion à **0 % de succès**. La BDD restait figée (niv 1, STR 18, XP 0) malgré la progression en jeu.
+
+**Binaire serveur :** `/mnt/debian/home/tom/Public/FinalStEp0/T4Serv3/build/T4CServer` (compilé via CMake depuis `Exe Server/`, **pas** `tools/`).
+
+### Cause racine
+
+La save de déconnexion était accrochée au mauvais déclencheur. Sur Linux il existe **plusieurs chemins de sortie** distincts, et chaque test empruntait un chemin différent :
+- `AcceptVoluntaryExitGame` (ExitGame volontaire) — **non appelé** quand l'antiplug refuse l'ExitGame (déco < ~13 s d'inactivité).
+- Chemin de **suppression rapide** dans `AsyncDeletePlayer` (`!in_game && !registred && !boPreInGame && !boRerolling && keyCode==0`) : `delete` immédiat, court-circuitant la save.
+- **`PurgeAccountSessionsExcept`** (déclenché par la reconnexion) : supprime l'ancienne session en jeu via `DeletePlayer(…, FALSE)` sans passer par la save.
+
+Les saves qui « fonctionnaient » dans les logs (`ODBC requests took 0-1ms`) étaient des saves de **login** (`GetPersonnalPClist`, `bFORCE=TRUE`) → position encore au spawn.
+
+### Tentatives infructueuses (régressions, finalement reverties)
+
+1. **Save synchrone + `WaitForSaving()` dans `AcceptVoluntaryExitGame`** (thread UDP) → blocage du thread réseau : `[PKT] paquet 26 ignore — joueur NULL`, reconnexion instable.
+2. **`SaveCharacter(TRUE, …, TRUE)` (boCallback=TRUE) + `WaitForSaving()` dans `AsyncDeletePlayer`** → `[DEADLOCK] Suspected stall in 'Player Deletion Thread'` (l'event `hCreationEvent` jamais signalé par le callback ODBC pendant la suppression).
+3. **Flag `boSaveOnDelete` posé dans `AcceptVoluntaryExitGame`** → jamais lu, car la fonction n'est pas appelée quand l'antiplug refuse.
+4. **Gate sur `boCanSave` dans le fast-path `AsyncDeletePlayer`** → ne couvre pas la purge de reconnexion.
+
+Mécanisme de save (référence) :
+- `SaveCharacter(bFORCE, who, boCallback)` : si `!boCanSave && !bFORCE` → retourne FALSE (rien). Construit le SQL (`UPDATE PlayingCharacters SET … wlX,wlY,wlWorld … WHERE UserID`), puis `ODBCCharAsyncSave.SendBatchRequest` (fire-and-forget vers le thread ODBC, qui commit).
+- `boCallback=TRUE` → `SavingStart()` fait `ResetEvent` ; `WaitForSaving()` bloque à l'INFINI jusqu'au callback `DataSaveCallback`→`SavingStop()`. **Source du deadlock** si le callback ne vient pas.
+- `boCallback=FALSE` → pas de `ResetEvent`, `WaitForSaving()` ne bloque pas.
+
+### Correctif retenu (fonctionne, confirmé en jeu)
+
+Sauvegarde dans **`CPlayerManager::DeletePlayer`** (`Exe Server/PlayerManager.cpp`), le **point de passage UNIQUE** de toutes les déconnexions (seule fonction qui `PostQueuedCompletionStatus(hDeletionIo,…)` → alimente `AsyncDeletePlayer`). Appelée par : maintenance, idle, `PurgeAccountSessionsExcept`, `DropFlaggedSessionAt`, `CommCenter`.
+
+- Save effectuée **tôt**, avant tout `reset_character`/teardown → la position/XP en mémoire sont encore les vraies.
+- `SaveCharacter(TRUE, "DeletePlayer", FALSE)` : `bFORCE=TRUE` (ne dépend pas de `boCanSave`, comme la save login qui marche) ; `boCallback=FALSE` (fire-and-forget, **aucun blocage**, pas de deadlock, pas d'impact reconnexion).
+- Condition : `self != NULL && ( in_game || boCanSave )` — couvre purge/timeout (`in_game`) et ExitGame (`boCanSave`, posé à l'opcode 46 et conservé).
+- Log diagnostic stderr : `[AUTH] DeletePlayer save compte='…' perso='…' ret=… UserID=… pos X,Y w=W in_game=… canSave=…`.
+
+`AsyncDeletePlayer` **remis à son état d'origine** (les saves y étaient redondantes et risquaient d'écraser la bonne position par le spawn après `reset_character`).
+
+> Note : `ret=0` dans le log est **normal** — `SaveCharacter` retourne `FALSE` à sa fin normale après l'envoi du batch ; ce n'est pas un échec.
+
+### Vestiges laissés en place (sur demande, sans impact fonctionnel)
+
+- Log `[AUTH] DeletePlayer save …` conservé (utile si futur bug de save).
+- Champ `Players::boSaveOnDelete` (+ init `PLAYERS.CPP` + set dans `AcceptVoluntaryExitGame`) : **plus utilisé**, conservé pour l'instant.
+
+### Fichiers touchés (état final)
+
+- `Exe Server/PlayerManager.cpp` : save dans `DeletePlayer` ; `AsyncDeletePlayer` restauré.
+- `Exe Server/Players.h`, `Exe Server/PLAYERS.CPP`, `Exe Server/TFCMessagesHandler.cpp` : `boSaveOnDelete` (vestige).
+- Tests : `tests/test_save_guards.cpp`, `scripts/test_save_persist.sh` (non commités).
+
+**Résultat : réapparition à la position de sortie confirmée en jeu, sur tous les chemins de déconnexion, sans régression connexion/reconnexion.**
+
+---
+
 ## 2026-06-21 18:00:00 — FIX client Windows : crash / freeze a la mort du personnage
 
 **Famille : Réseau / Rendu**
